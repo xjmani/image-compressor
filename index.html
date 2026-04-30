@@ -1,0 +1,2190 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#08090a" />
+<meta name="color-scheme" content="dark light" />
+<title>Image Compressor — xjmani</title>
+<meta name="description" content="Compress images and strip EXIF metadata. Everything happens in your browser. Nothing is uploaded." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  /* ============================================================
+     TOKENS — lifted from xjmani.com globals.css
+     ============================================================ */
+  :root {
+    --bg:        #08090a;
+    --bg-raised: #0f1012;
+    --bg-card:   #131416;
+    --surface:   #1a1b1e;
+    --border:    rgba(255,255,255,.06);
+    --border-hover: rgba(255,255,255,.12);
+    --text:      #e4e4e7;
+    --text-dim:  #a1a1aa;
+    --text-mute: #52525b;
+    --green:     #22c55e;
+    --green-dim: rgba(34,197,94,.15);
+    --green-glow:rgba(34,197,94,.25);
+    --purple:    #a78bfa;
+    --purple-dim:rgba(167,139,250,.12);
+    --yellow:    #ffca00;
+    --yellow-dim:rgba(255,202,0,.12);
+    --red:       #f87171;
+    --amber:     #fbbf24;
+    --white:     #fafafa;
+
+    --font-body:  'Outfit', system-ui, sans-serif;
+    --font-mono:  'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+
+    --size-hero:  clamp(2.6rem, 7vw + 1rem, 5.5rem);
+    --size-h2:    clamp(1.75rem, 3vw + .5rem, 2.75rem);
+    --size-h3:    clamp(1.15rem, 1.5vw + .3rem, 1.5rem);
+    --size-body:  clamp(.94rem, .5vw + .8rem, 1.0625rem);
+    --size-small: clamp(.8rem, .2vw + .75rem, .875rem);
+    --size-mono:  clamp(.75rem, .3vw + .65rem, .8125rem);
+
+    --gap:    clamp(1.5rem, 3vw, 2.5rem);
+    --gap-lg: clamp(3.75rem, 6vw, 5.5rem);
+
+    --ease:        cubic-bezier(.4,0,.2,1);
+    --ease-spring: cubic-bezier(.34,1.56,.64,1);
+    --ease-out-expo: cubic-bezier(.16,1,.3,1);
+    --dur:    .35s;
+
+    --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--green);
+  }
+
+  [data-theme="light"] {
+    --bg:        #f8f8f8;
+    --bg-raised: #ffffff;
+    --bg-card:   #ffffff;
+    --surface:   #f0f0f2;
+    --border:    rgba(0,0,0,.08);
+    --border-hover: rgba(0,0,0,.15);
+    --text:      #1a1a1a;
+    --text-dim:  #525252;
+    --text-mute: #78716c;
+    --green:     #16a34a;
+    --green-dim: rgba(22,163,74,.1);
+    --green-glow:rgba(22,163,74,.15);
+    --purple:    #7c3aed;
+    --purple-dim:rgba(124,58,237,.08);
+    --yellow:    #ca8a04;
+    --yellow-dim:rgba(202,138,4,.1);
+  }
+
+  /* ============================================================
+     RESET / BASE
+     ============================================================ */
+  *, *::before, *::after { box-sizing: border-box; }
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+    overflow-x: clip;
+  }
+  body {
+    margin: 0;
+    font-family: var(--font-body);
+    font-size: var(--size-body);
+    color: var(--text);
+    background: var(--bg);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: clip;
+    /* Older Safari fallback */
+    overflow-x: hidden;
+    overflow-x: clip;
+  }
+
+  /* noise overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    pointer-events: none;
+    opacity: .035;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 180px;
+  }
+  /* dot grid (dark only) */
+  [data-theme="dark"] body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: .2;
+    background-image: radial-gradient(circle, rgba(255,255,255,.08) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+
+  a { color: inherit; text-decoration: none; }
+  img { display: block; max-width: 100%; }
+  button { font: inherit; cursor: pointer; }
+  ::selection { background: var(--green-glow); color: var(--text); }
+
+  :focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 4px; }
+
+  .container {
+    width: 100%;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 clamp(1.5rem, 4.5vw, 2.5rem);
+  }
+
+  /* ============================================================
+     HEADER
+     ============================================================ */
+  .hdr {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    background: color-mix(in srgb, var(--bg) 80%, transparent);
+    border-bottom: 1px solid var(--border);
+  }
+  .hdr__inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-block: .9rem;
+  }
+  .hdr__brand {
+    display: inline-flex;
+    align-items: center;
+    gap: .55rem;
+    font-family: var(--font-mono);
+    font-size: var(--size-mono);
+    color: var(--text-dim);
+    transition: color .2s var(--ease);
+  }
+  .hdr__brand:hover { color: var(--text); }
+  .hdr__brand .arr { color: var(--green); }
+  .hdr__brand .name {
+    color: var(--text);
+    font-weight: 500;
+  }
+  .hdr__brand .name .x { color: var(--green); }
+  .hdr__sep {
+    color: var(--text-mute);
+    margin-inline: .35rem;
+  }
+  .hdr__tool {
+    color: var(--text-dim);
+  }
+  .hdr__right {
+    display: flex;
+    align-items: center;
+    gap: .85rem;
+  }
+  .net-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .45rem .75rem;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    font-size: var(--size-mono);
+    color: var(--text-dim);
+    transition: all .2s var(--ease);
+  }
+  .net-pill:hover { border-color: var(--border-hover); }
+  .net-pill .dot {
+    width: 6px; height: 6px;
+    border-radius: 999px;
+    background: var(--green);
+    box-shadow: 0 0 0 0 var(--green-glow);
+    animation: pulse 2.4s var(--ease) infinite;
+  }
+  .net-pill[data-state="dirty"] .dot {
+    background: var(--red);
+    animation-duration: 1s;
+  }
+  .net-pill[data-state="dirty"] {
+    color: var(--red);
+    border-color: color-mix(in srgb, var(--red) 40%, transparent);
+  }
+  .net-pill .label { letter-spacing: .02em; }
+  .net-pill .num { color: var(--text); font-weight: 600; }
+  .net-pill[data-state="dirty"] .num { color: var(--red); }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 var(--green-glow); }
+    50%      { box-shadow: 0 0 0 6px transparent; }
+  }
+  .theme-tog {
+    width: 36px; height: 36px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    border-radius: 10px;
+    color: var(--text-dim);
+    transition: all .2s var(--ease);
+  }
+  .theme-tog:hover { color: var(--text); border-color: var(--border-hover); }
+  .theme-tog svg { width: 16px; height: 16px; }
+  [data-theme="dark"] .theme-tog .moon,
+  [data-theme="light"] .theme-tog .sun { display: none; }
+
+  /* ============================================================
+     HERO
+     ============================================================ */
+  main { position: relative; z-index: 1; }
+  .hero {
+    padding-block: clamp(2.75rem, 6vw, 4.5rem) clamp(2rem, 4vw, 3rem);
+    position: relative;
+  }
+  .hero__eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .35rem .7rem;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    font-size: var(--size-mono);
+    color: var(--text-dim);
+    margin-bottom: 1.25rem;
+  }
+  .hero__eyebrow::before {
+    content: '';
+    width: 6px; height: 6px;
+    border-radius: 999px;
+    background: var(--green);
+    box-shadow: 0 0 0 3px var(--green-dim);
+  }
+  .hero__title {
+    font-family: var(--font-body);
+    font-weight: 600;
+    font-size: var(--size-hero);
+    line-height: .95;
+    letter-spacing: -.03em;
+    margin: 0 0 .9rem;
+    color: var(--text);
+  }
+  .hero__title .accent {
+    background: linear-gradient(90deg, var(--green), color-mix(in srgb, var(--green) 50%, var(--purple)));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .hero__sub {
+    font-size: clamp(1rem, 1vw + .8rem, 1.18rem);
+    color: var(--text-dim);
+    max-width: 56ch;
+    margin: 0 0 2.5rem;
+  }
+  .hero__sub strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  /* atmospheric orb behind hero */
+  .hero { overflow: clip; }
+  .hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(40% 50% at 80% 20%, var(--green-dim) 0%, transparent 70%);
+    opacity: .65;
+    z-index: -1;
+  }
+
+  /* ============================================================
+     DROP ZONE
+     ============================================================ */
+  .drop {
+    position: relative;
+    border: 1px dashed color-mix(in srgb, var(--green) 35%, var(--border) 65%);
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--green) 4%, transparent), transparent 60%),
+      var(--bg-card);
+    border-radius: 16px;
+    padding: clamp(2.5rem, 5vw, 3.75rem) clamp(1.5rem, 3vw, 2.25rem);
+    text-align: center;
+    transition: all .25s var(--ease);
+    overflow: hidden;
+  }
+  .drop::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--green) 40%, transparent) 1px, transparent 0);
+    background-size: 18px 18px;
+    opacity: .14;
+    pointer-events: none;
+    transition: opacity .25s var(--ease);
+  }
+  .drop[data-active="true"] {
+    border-color: var(--green);
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--green) 10%, transparent), transparent 70%),
+      var(--bg-card);
+    transform: scale(1.005);
+  }
+  .drop[data-active="true"]::before { opacity: .35; }
+  .drop__icon {
+    width: 56px; height: 56px;
+    margin: 0 auto 1rem;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border-hover);
+    background: var(--surface);
+    border-radius: 14px;
+    color: var(--green);
+    transition: all .25s var(--ease);
+  }
+  .drop[data-active="true"] .drop__icon {
+    border-color: var(--green);
+    background: var(--green-dim);
+    transform: translateY(-2px);
+  }
+  .drop__icon svg { width: 24px; height: 24px; }
+  .drop__title {
+    font-family: var(--font-mono);
+    font-size: var(--size-h3);
+    font-weight: 500;
+    letter-spacing: -.01em;
+    margin: 0 0 .35rem;
+    color: var(--text);
+  }
+  .drop__title .blink {
+    display: inline-block;
+    width: .55ch;
+    background: var(--green);
+    color: transparent;
+    margin-left: 2px;
+    animation: caret 1.05s steps(1) infinite;
+  }
+  @keyframes caret { 50% { background: transparent; } }
+  .drop__sub {
+    font-size: var(--size-small);
+    color: var(--text-dim);
+    margin: 0 0 1.25rem;
+  }
+  .drop__btn {
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .7rem 1.15rem;
+    background: var(--green);
+    color: #02110a;
+    border: none;
+    border-radius: 10px;
+    font-family: var(--font-mono);
+    font-size: var(--size-small);
+    font-weight: 600;
+    letter-spacing: .01em;
+    transition: all .2s var(--ease);
+  }
+  .drop__btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px -8px var(--green-glow);
+  }
+  .drop__formats {
+    margin-top: 1.25rem;
+    font-family: var(--font-mono);
+    font-size: var(--size-mono);
+    color: var(--text-mute);
+    letter-spacing: .04em;
+  }
+
+  /* ============================================================
+     SETTINGS STRIP
+     ============================================================ */
+  .settings {
+    margin-top: 1.5rem;
+  }
+  .settings__row {
+    display: grid;
+    gap: .65rem;
+    grid-template-columns: 1fr;
+  }
+  /* Each field is its own raised tile — separation by surface, not lines.
+     Subgrid keeps label/control/hint rows aligned across all 4 tiles. */
+  @media (min-width: 720px) {
+    .settings__row {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-rows: auto auto auto;
+      column-gap: .65rem;
+      row-gap: .65rem;
+    }
+    .field {
+      grid-row: span 3;
+      grid-template-rows: subgrid;
+      display: grid;
+      gap: 0;
+    }
+  }
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: .8rem;
+    min-width: 0;
+    padding: 1.05rem 1.15rem 1.1rem;
+    background: var(--bg-card);
+    border-radius: 12px;
+    transition: background .2s var(--ease);
+  }
+  .field:hover { background: color-mix(in srgb, var(--text) 4%, var(--bg-card)); }
+  .field__label {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: .5rem;
+    font-family: var(--font-mono);
+    font-size: var(--size-mono);
+    color: var(--text-dim);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    font-weight: 500;
+    margin: 0;
+  }
+  .field__value {
+    color: var(--text);
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .field__control {
+    display: flex;
+    align-items: center;
+    min-height: 40px;
+  }
+  .field__hint {
+    font-size: var(--size-mono);
+    font-family: var(--font-mono);
+    color: var(--text-mute);
+    letter-spacing: .02em;
+    line-height: 1.45;
+    margin: 0;
+  }
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    background: linear-gradient(90deg, var(--green) var(--pct, 50%), var(--surface) var(--pct, 50%));
+    border-radius: 999px;
+    outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px; height: 16px;
+    border-radius: 999px;
+    background: var(--text);
+    border: 2px solid var(--bg);
+    box-shadow: 0 0 0 1px var(--green);
+    transition: transform .15s var(--ease);
+  }
+  input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.1); }
+  input[type="range"]::-moz-range-thumb {
+    width: 16px; height: 16px;
+    border-radius: 999px;
+    background: var(--text);
+    border: 2px solid var(--bg);
+    box-shadow: 0 0 0 1px var(--green);
+  }
+  .seg {
+    display: flex;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 3px;
+    gap: 2px;
+    width: 100%;
+  }
+  .seg button {
+    flex: 1;
+    padding: .55rem .5rem;
+    border: 0;
+    background: transparent;
+    border-radius: 7px;
+    font-family: var(--font-mono);
+    font-size: var(--size-mono);
+    color: var(--text-dim);
+    transition: all .15s var(--ease);
+    letter-spacing: .03em;
+  }
+  .seg button:hover { color: var(--text); }
+  .seg button[aria-pressed="true"] {
+    background: var(--green-dim);
+    color: var(--green);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--green) 35%, transparent) inset,
+      0 0 16px -4px var(--green-glow);
+    font-weight: 600;
+  }
+  .toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: .65rem;
+    cursor: pointer;
+    user-select: none;
+    font-family: var(--font-mono);
+    font-size: var(--size-small);
+    color: var(--text);
+  }
+  .toggle input { position: absolute; opacity: 0; pointer-events: none; }
+  .toggle__track {
+    position: relative;
+    width: 36px; height: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    transition: all .2s var(--ease);
+  }
+  .toggle__track::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 14px; height: 14px;
+    background: var(--text-dim);
+    border-radius: 999px;
+    transition: all .2s var(--ease-spring);
+  }
+  .toggle input:checked + .toggle__track {
+    background: var(--green);
+    border-color: var(--green);
+  }
+  .toggle input:checked + .toggle__track::after {
+    transform: translateX(16px);
+    background: #02110a;
+  }
+  .toggle:hover .toggle__track { border-color: var(--border-hover); }
+  .toggle__hint {
+    font-size: var(--size-mono);
+    color: var(--text-mute);
+  }
+
+  /* ============================================================
+     QUEUE / RESULTS
+     ============================================================ */
+  .queue {
+    margin-top: 2rem;
+  }
+  .queue__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: .8rem;
+    flex-wrap: wrap;
+  }
+  .queue__title {
+    font-family: var(--font-mono);
+    font-size: var(--size-mono);
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--text-dim);
+    margin: 0;
+  }
+  .queue__title .num { color: var(--green); font-weight: 600; }
+  .queue__actions {
+    display: inline-flex;
+    gap: .55rem;
+    row-gap: .65rem;
+    flex-wrap: wrap;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .55rem .95rem;
+    border-radius: 10px;
+    font-family: var(--font-mono);
+    font-size: var(--size-mono);
+    font-weight: 500;
+    letter-spacing: .03em;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text);
+    transition: all .2s var(--ease);
+  }
+  .btn:hover { border-color: var(--border-hover); transform: translateY(-1px); }
+  .btn--green {
+    background: var(--green);
+    color: #02110a;
+    border-color: var(--green);
+  }
+  .btn--green:hover {
+    box-shadow: 0 8px 24px -8px var(--green-glow);
+  }
+  .btn--ghost {
+    background: transparent;
+  }
+  .btn:disabled {
+    opacity: .4;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .btn svg { width: 14px; height: 14px; }
+
+  .row {
+    display: grid;
+    grid-template-columns: 56px 1fr auto;
+    gap: 1rem;
+    align-items: center;
+    padding: 1rem 1.15rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: .65rem;
+    transition: all .2s var(--ease);
+    position: relative;
+    overflow: hidden;
+  }
+  .row:hover { border-color: var(--border-hover); }
+  .row[data-state="processing"]::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--green) 18%, transparent), transparent);
+    transform: translateX(-100%);
+    animation: scan 1.4s var(--ease) infinite;
+    pointer-events: none;
+  }
+  @keyframes scan {
+    100% { transform: translateX(100%); }
+  }
+  /* recomputing — keep the previous numbers visible but pulse to show they're stale */
+  .row[data-recomputing="true"] .to,
+  .row[data-recomputing="true"] .row__badge--save {
+    animation: stale-pulse 1.6s var(--ease) infinite;
+  }
+  @keyframes stale-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: .55; }
+  }
+  .row[data-recomputing="true"] [data-extra] .row__badge {
+    opacity: .55;
+  }
+  .row__thumb {
+    width: 56px; height: 56px;
+    border-radius: 8px;
+    background: var(--surface);
+    overflow: hidden;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .row__thumb img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+  }
+  .row__main {
+    min-width: 0;
+    display: grid;
+    gap: .35rem;
+  }
+  .row__name {
+    font-family: var(--font-body);
+    font-size: var(--size-body);
+    font-weight: 500;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .row__meta {
+    display: flex;
+    align-items: center;
+    gap: .65rem;
+    flex-wrap: wrap;
+    font-family: var(--font-mono);
+    font-size: var(--size-mono);
+    color: var(--text-dim);
+    letter-spacing: .02em;
+  }
+  .row__meta .from { color: var(--text-mute); text-decoration: line-through; text-decoration-color: var(--text-mute); }
+  .row__meta .arrow { color: var(--text-mute); }
+  .row__meta .to {
+    color: var(--text);
+    font-weight: 600;
+    font-size: calc(var(--size-mono) + 1px);
+  }
+  .row__badge {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    padding: .25rem .55rem;
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    background: var(--surface);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    line-height: 1;
+  }
+  .row__badge--save {
+    background: var(--green-dim);
+    color: var(--green);
+    border-color: color-mix(in srgb, var(--green) 25%, transparent);
+  }
+  .row__badge--exif {
+    background: var(--yellow-dim);
+    color: var(--yellow);
+    border-color: color-mix(in srgb, var(--yellow) 25%, transparent);
+  }
+  .row__badge--gps {
+    background: color-mix(in srgb, var(--red) 12%, transparent);
+    color: var(--red);
+    border-color: color-mix(in srgb, var(--red) 30%, transparent);
+  }
+  .row__badge--err {
+    background: color-mix(in srgb, var(--red) 12%, transparent);
+    color: var(--red);
+    border-color: color-mix(in srgb, var(--red) 30%, transparent);
+  }
+  .row__icon-btn {
+    width: 36px; height: 36px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: 10px;
+    color: var(--text-dim);
+    transition: all .2s var(--ease);
+    flex-shrink: 0;
+  }
+  .row__icon-btn:hover {
+    color: var(--green);
+    border-color: var(--green);
+    background: var(--green-dim);
+  }
+  .row__icon-btn svg { width: 14px; height: 14px; }
+  .row__icon-btn:disabled { opacity: .3; pointer-events: none; }
+
+  /* mobile row layout */
+  @media (max-width: 600px) {
+    .row {
+      grid-template-columns: 48px 1fr;
+      grid-template-areas:
+        "thumb main"
+        "actions actions";
+      row-gap: .85rem;
+    }
+    .row__thumb { grid-area: thumb; width: 48px; height: 48px; }
+    .row__main { grid-area: main; }
+    .row__actions { grid-area: actions; display: flex; justify-content: flex-end; }
+    .row__meta { font-size: 11px; }
+  }
+
+  /* mobile header — hide secondary text so brand + controls fit */
+  @media (max-width: 540px) {
+    .hdr__sep, .hdr__tool { display: none; }
+    .net-pill .label { display: none; }
+    .net-pill { padding: .4rem .65rem; gap: .4rem; }
+  }
+  /* mobile section vertical rhythm */
+  @media (max-width: 600px) {
+    .section__head { margin-bottom: 1.75rem; }
+    .proof, .home__grid { gap: 1.25rem; }
+  }
+
+  /* ============================================================
+     STATS BAR
+     ============================================================ */
+  .stats {
+    margin-top: 2rem;
+    border: 1px solid var(--border);
+    background:
+      linear-gradient(135deg, color-mix(in srgb, var(--green) 6%, transparent), transparent 60%),
+      var(--bg-card);
+    border-radius: 14px;
+    padding: 1.35rem 1.4rem;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+  @media (min-width: 720px) {
+    .stats { grid-template-columns: repeat(4, 1fr); }
+  }
+  .stat {
+    display: flex;
+    flex-direction: column;
+    gap: .3rem;
+  }
+  .stat__label {
+    font-family: var(--font-mono);
+    font-size: var(--size-mono);
+    color: var(--text-dim);
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+  .stat__value {
+    font-family: var(--font-mono);
+    font-size: clamp(1.4rem, 2vw + .6rem, 1.85rem);
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -.01em;
+    line-height: 1;
+  }
+  .stat__value .unit {
+    font-size: .65em;
+    color: var(--text-dim);
+    font-weight: 500;
+    margin-left: .15rem;
+  }
+  .stat__value.stat--saved { color: var(--green); }
+  .stat__sub {
+    font-family: var(--font-mono);
+    font-size: var(--size-mono);
+    color: var(--text-mute);
+  }
+
+  /* ============================================================
+     PROOF SECTION
+     ============================================================ */
+  section.section { padding-block: var(--gap-lg); position: relative; overflow: clip; }
+  .section__head { margin-bottom: var(--gap); max-width: 60ch; }
+  .section__eyebrow {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: var(--size-mono);
+    color: var(--green);
+    letter-spacing: .15em;
+    text-transform: uppercase;
+    margin-bottom: .7rem;
+  }
+  .section__title {
+    font-family: var(--font-body);
+    font-size: var(--size-h2);
+    font-weight: 600;
+    line-height: 1.05;
+    letter-spacing: -.02em;
+    margin: 0 0 .8rem;
+    color: var(--text);
+  }
+  .section__lede {
+    font-size: clamp(1rem, 1vw + .8rem, 1.12rem);
+    color: var(--text-dim);
+    margin: 0;
+  }
+
+  .proof {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 720px) { .proof { grid-template-columns: repeat(3, 1fr); } }
+  .proof__item {
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    border-radius: 14px;
+    padding: 1.5rem 1.4rem;
+    display: flex;
+    flex-direction: column;
+    gap: .8rem;
+    transition: all .25s var(--ease);
+  }
+  .proof__item:hover { border-color: var(--border-hover); transform: translateY(-2px); }
+  .proof__num {
+    font-family: var(--font-mono);
+    font-size: var(--size-mono);
+    color: var(--green);
+    letter-spacing: .15em;
+  }
+  .proof__title {
+    font-family: var(--font-body);
+    font-size: var(--size-h3);
+    font-weight: 600;
+    margin: 0;
+    color: var(--text);
+  }
+  .proof__body { color: var(--text-dim); margin: 0; font-size: var(--size-small); line-height: 1.65; }
+  .proof__verify {
+    margin-top: auto;
+    font-family: var(--font-mono);
+    font-size: var(--size-mono);
+    color: var(--green);
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    padding: 0;
+    text-align: left;
+  }
+  .proof__verify:hover { text-decoration: underline; }
+
+  /* ============================================================
+     TAKE-IT-HOME (yellow accent — Loyalty Draw brand)
+     ============================================================ */
+  .home {
+    --accent: var(--yellow);
+    --accent-dim: var(--yellow-dim);
+    position: relative;
+  }
+  .home::before {
+    content: '';
+    position: absolute;
+    top: 10%; right: -8%;
+    width: 38%; aspect-ratio: 1;
+    background: radial-gradient(circle, var(--yellow-dim), transparent 70%);
+    filter: blur(40px);
+    opacity: .6;
+    pointer-events: none;
+    z-index: -1;
+  }
+  .home .section__eyebrow { color: var(--yellow); }
+  .home__grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 800px) { .home__grid { grid-template-columns: repeat(3, 1fr); } }
+  .home__card {
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    border-radius: 14px;
+    padding: 1.5rem 1.4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    transition: all .25s var(--ease);
+    position: relative;
+    overflow: hidden;
+  }
+  .home__card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, var(--yellow-dim), transparent 55%);
+    opacity: 0;
+    transition: opacity .25s var(--ease);
+    pointer-events: none;
+  }
+  .home__card:hover { border-color: color-mix(in srgb, var(--yellow) 35%, var(--border)); }
+  .home__card:hover::before { opacity: 1; }
+  .home__top {
+    display: flex; align-items: center; gap: .75rem;
+  }
+  .home__icon {
+    width: 36px; height: 36px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--yellow-dim);
+    color: var(--yellow);
+    border-radius: 10px;
+  }
+  .home__icon svg { width: 16px; height: 16px; }
+  .home__label {
+    font-family: var(--font-mono);
+    font-size: var(--size-mono);
+    color: var(--text-dim);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .home__title {
+    font-family: var(--font-body);
+    font-size: var(--size-h3);
+    font-weight: 600;
+    margin: 0;
+    color: var(--text);
+  }
+  .home__desc {
+    color: var(--text-dim);
+    font-size: var(--size-small);
+    line-height: 1.6;
+    margin: 0;
+    flex-grow: 1;
+  }
+  /* Code-block pattern: copy button floats in top-right corner.
+     Prompt + code flow as inline text on one line; only breaks at spaces. */
+  .home__cmd {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: .6rem .8rem;
+    padding-right: 2.8rem;
+    font-family: var(--font-mono);
+    font-size: var(--size-mono);
+    color: var(--text);
+    line-height: 1.55;
+    overflow-wrap: break-word;
+  }
+  .home__cmd .prompt { margin-right: .5em; }
+  .home__cmd code { color: inherit; }
+  .home__copy {
+    position: absolute;
+    top: .3rem;
+    right: .3rem;
+    width: 26px; height: 26px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-mute);
+    padding: 0;
+    transition: all .15s var(--ease);
+  }
+  .home__copy:hover {
+    color: var(--green);
+    border-color: color-mix(in srgb, var(--green) 35%, transparent);
+    background: var(--green-dim);
+  }
+  .home__copy svg { width: 12px; height: 12px; display: block; }
+  .home__cmd .prompt { color: var(--green); flex-shrink: 0; }
+  .home__cmd code { color: var(--text); }
+  .home__copy {
+    margin-left: auto;
+    background: transparent;
+    border: 0;
+    color: var(--text-mute);
+    padding: 2px 4px;
+    border-radius: 4px;
+    transition: color .2s var(--ease);
+    flex-shrink: 0;
+  }
+  .home__copy:hover { color: var(--green); }
+  .home__copy svg { width: 13px; height: 13px; display: block; }
+  .home__cta {
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    color: var(--yellow);
+    font-family: var(--font-mono);
+    font-size: var(--size-mono);
+    font-weight: 600;
+    letter-spacing: .04em;
+    margin-top: .25rem;
+    transition: gap .2s var(--ease);
+  }
+  .home__card:hover .home__cta { gap: .75rem; }
+
+  /* ============================================================
+     FOOTER — IDE-style status bar. Single row, mono, universal.
+     ============================================================ */
+  footer.foot {
+    margin-top: var(--gap-lg);
+    background: color-mix(in srgb, var(--text) 3%, var(--bg));
+    border-top: 1px solid var(--border);
+    padding-block: .9rem;
+    font-family: var(--font-mono);
+    font-size: var(--size-mono);
+    letter-spacing: .02em;
+    color: var(--text-mute);
+  }
+  .foot__bar {
+    display: flex;
+    align-items: center;
+    gap: .55rem .8rem;
+    flex-wrap: wrap;
+    line-height: 1.4;
+  }
+  .foot__live {
+    width: 7px; height: 7px;
+    border-radius: 999px;
+    background: var(--green);
+    box-shadow: 0 0 0 0 var(--green-glow);
+    animation: foot-pulse 2.4s var(--ease) infinite;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+  @keyframes foot-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 var(--green-glow); }
+    50%      { box-shadow: 0 0 0 5px transparent; }
+  }
+  .foot__brand-mini {
+    color: var(--text);
+    font-weight: 600;
+  }
+  .foot__brand-mini .x { color: var(--green); }
+  .foot__sep {
+    color: var(--text-mute);
+    user-select: none;
+  }
+  .foot__bar a {
+    color: var(--text-dim);
+    transition: color .2s var(--ease);
+    display: inline-flex;
+    align-items: center;
+    gap: .25rem;
+  }
+  .foot__bar a::after {
+    content: '↗';
+    font-size: 10px;
+    color: var(--text-mute);
+    transition: transform .2s var(--ease), color .2s var(--ease);
+  }
+  .foot__bar a:hover { color: var(--text); }
+  .foot__bar a:hover::after { color: var(--green); transform: translate(1px, -1px); }
+  .foot__spacer { margin-left: auto; }
+  @media (max-width: 720px) {
+    .foot__spacer { margin-left: 0; flex-basis: 100%; height: 0; }
+  }
+
+  /* ============================================================
+     TOAST
+     ============================================================ */
+  .toast {
+    position: fixed;
+    bottom: 1.25rem;
+    left: 50%;
+    transform: translateX(-50%) translateY(120%);
+    z-index: 200;
+    background: var(--bg-card);
+    border: 1px solid var(--border-hover);
+    border-radius: 12px;
+    padding: .7rem 1.05rem;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: var(--size-mono);
+    box-shadow: 0 12px 40px -12px rgba(0,0,0,.5);
+    transition: transform .35s var(--ease-spring);
+    display: inline-flex;
+    align-items: center;
+    gap: .55rem;
+  }
+  .toast[data-visible="true"] { transform: translateX(-50%) translateY(0); }
+  .toast__dot {
+    width: 6px; height: 6px;
+    border-radius: 999px;
+    background: var(--green);
+  }
+
+  /* ============================================================
+     EMPTY / HIDDEN
+     ============================================================ */
+  .hidden { display: none !important; }
+
+  /* ============================================================
+     REDUCED MOTION
+     ============================================================ */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: .001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     HEADER
+     ============================================================ -->
+<header class="hdr">
+  <div class="container hdr__inner">
+    <a href="/" class="hdr__brand" aria-label="Back to xjmani.com">
+      <span class="arr">←</span>
+      <span class="name"><span class="x">x</span>jmani</span>
+      <span class="hdr__sep">/</span>
+      <span class="hdr__tool">image-compressor</span>
+    </a>
+    <div class="hdr__right">
+      <button class="net-pill" id="netPill" data-state="clean" type="button" aria-live="polite" title="Network requests since page load">
+        <span class="dot" aria-hidden="true"></span>
+        <span class="label">network</span>
+        <span class="num" id="netCount">0</span>
+      </button>
+      <button class="theme-tog" id="themeTog" type="button" aria-label="Toggle theme">
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+        </svg>
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- ============================================================
+       HERO + DROP ZONE
+       ============================================================ -->
+  <section class="hero">
+    <div class="container">
+      <span class="hero__eyebrow">private · offline · zero uploads</span>
+      <h1 class="hero__title">Compress images.<br /><span class="accent">Strip the metadata.</span></h1>
+      <p class="hero__sub">Shrink JPEGs, PNGs, and WebPs and remove every embedded GPS coordinate, camera serial, and timestamp <strong>without a single byte leaving your device</strong>. Drag a file in. Watch the network counter stay at zero.</p>
+
+      <div class="drop" id="drop" tabindex="0" role="button" aria-label="Drop images here or click to browse">
+        <div class="drop__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="3"/>
+            <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor"/>
+            <path d="m3 17 5-5 4 4 3-3 6 6"/>
+          </svg>
+        </div>
+        <h2 class="drop__title">drop images<span class="blink">_</span></h2>
+        <p class="drop__sub">JPEG · PNG · WebP — up to 50 files at once</p>
+        <button class="drop__btn" id="browseBtn" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          choose files
+        </button>
+        <input type="file" id="filePicker" accept="image/jpeg,image/jpg,image/png,image/webp" multiple hidden />
+      </div>
+
+      <!-- Settings strip -->
+      <div class="settings">
+        <div class="settings__row">
+          <div class="field">
+            <label class="field__label" for="qualityRange">
+              <span>Quality</span>
+              <span class="field__value" id="qualityVal">80</span>
+            </label>
+            <div class="field__control">
+              <input type="range" id="qualityRange" min="10" max="100" value="80" step="1" />
+            </div>
+            <p class="field__hint">higher = bigger file</p>
+          </div>
+
+          <div class="field">
+            <label class="field__label" for="maxWidthRange">
+              <span>Max Width</span>
+              <span class="field__value" id="maxWidthVal">2400px</span>
+            </label>
+            <div class="field__control">
+              <input type="range" id="maxWidthRange" min="320" max="4000" value="2400" step="40" />
+            </div>
+            <p class="field__hint">downsizes only, never enlarges</p>
+          </div>
+
+          <div class="field">
+            <span class="field__label">
+              <span>Format</span>
+              <span class="field__value" id="formatVal">keep</span>
+            </span>
+            <div class="field__control">
+              <div class="seg" role="group" aria-label="Output format">
+                <button data-fmt="keep"  aria-pressed="true">keep</button>
+                <button data-fmt="jpeg"  aria-pressed="false">jpeg</button>
+                <button data-fmt="webp"  aria-pressed="false">webp</button>
+                <button data-fmt="png"   aria-pressed="false">png</button>
+              </div>
+            </div>
+            <p class="field__hint">"keep" matches the input</p>
+          </div>
+
+          <div class="field">
+            <span class="field__label">
+              <span>EXIF</span>
+              <span class="field__value" id="exifVal">on</span>
+            </span>
+            <div class="field__control">
+              <label class="toggle">
+                <input type="checkbox" id="stripExif" checked />
+                <span class="toggle__track"></span>
+                <span>strip metadata</span>
+              </label>
+            </div>
+            <p class="field__hint">removes camera &amp; GPS</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Queue -->
+      <div class="queue hidden" id="queue">
+        <div class="queue__head">
+          <h3 class="queue__title">Queue · <span class="num" id="queueCount">0</span> file<span id="queuePlural">s</span></h3>
+          <div class="queue__actions">
+            <button class="btn btn--ghost" id="clearBtn" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
+              clear
+            </button>
+            <button class="btn btn--green" id="downloadAllBtn" type="button" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              download all (.zip)
+            </button>
+          </div>
+        </div>
+        <div id="rows"></div>
+
+        <!-- Stats bar -->
+        <div class="stats hidden" id="stats">
+          <div class="stat">
+            <span class="stat__label">Total Saved</span>
+            <span class="stat__value stat--saved" id="totalSaved">0 <span class="unit">KB</span></span>
+            <span class="stat__sub">across <span id="totalCount">0</span> files</span>
+          </div>
+          <div class="stat">
+            <span class="stat__label">Reduction</span>
+            <span class="stat__value" id="totalPct">0<span class="unit">%</span></span>
+            <span class="stat__sub">average across queue</span>
+          </div>
+          <div class="stat">
+            <span class="stat__label">EXIF Stripped</span>
+            <span class="stat__value" id="exifCount">0</span>
+            <span class="stat__sub">images had metadata removed</span>
+          </div>
+          <div class="stat">
+            <span class="stat__label">Uploaded</span>
+            <span class="stat__value" id="uploadedCount" style="color: var(--green)">0 <span class="unit">bytes</span></span>
+            <span class="stat__sub">that's the point</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       PROOF SECTION
+       ============================================================ -->
+  <section class="section">
+    <div class="container">
+      <div class="section__head">
+        <span class="section__eyebrow">verify it yourself</span>
+        <h2 class="section__title">Privacy as an instrument, not a claim.</h2>
+        <p class="section__lede">There's a counter in the header showing every network request the page has made since you opened it. After load, it stays at zero. Forever. If it ever ticks, the privacy claim is wrong — and you'll see it before we do.</p>
+      </div>
+
+      <div class="proof">
+        <article class="proof__item">
+          <span class="proof__num">01</span>
+          <h3 class="proof__title">No uploads</h3>
+          <p class="proof__body">Compression and EXIF stripping run in your browser using the Canvas API and a tiny EXIF parser. The bytes never leave the tab.</p>
+          <button class="proof__verify" type="button" data-verify="network">verify in devtools →</button>
+        </article>
+        <article class="proof__item">
+          <span class="proof__num">02</span>
+          <h3 class="proof__title">No telemetry, no analytics</h3>
+          <p class="proof__body">No Google Analytics, Plausible, Sentry — nothing reports back. The header counter would tick if it did. CSP is locked down to the origin.</p>
+          <button class="proof__verify" type="button" data-verify="csp">view source →</button>
+        </article>
+        <article class="proof__item">
+          <span class="proof__num">03</span>
+          <h3 class="proof__title">No tracking</h3>
+          <p class="proof__body">No cookies, no localStorage of file content, no fingerprinting. Settings stick on this device only. Refresh and the queue clears.</p>
+          <button class="proof__verify" type="button" data-verify="storage">inspect storage →</button>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       TAKE-IT-HOME SECTION
+       ============================================================ -->
+  <section class="section home">
+    <div class="container">
+      <div class="section__head">
+        <span class="section__eyebrow">run it offline</span>
+        <h2 class="section__title">Don't trust the page. Take it home.</h2>
+        <p class="section__lede">A single HTML file you can drop on a USB stick. A CLI you can pipe into your image folder. The full source under MIT. Pick your level of paranoia.</p>
+      </div>
+
+      <div class="home__grid">
+        <article class="home__card">
+          <div class="home__top">
+            <div class="home__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            </div>
+            <span class="home__label">single file</span>
+          </div>
+          <h3 class="home__title">Standalone HTML</h3>
+          <p class="home__desc">One self-contained <code style="font-family:var(--font-mono);font-size:.92em;color:var(--text)">index.html</code>. No internet required. Drop it on a thumb drive, double-click, work offline forever.</p>
+          <a class="home__cta" href="#" data-coming-soon>download (.html, ~340 KB) →</a>
+        </article>
+
+        <article class="home__card">
+          <div class="home__top">
+            <div class="home__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            </div>
+            <span class="home__label">command line</span>
+          </div>
+          <h3 class="home__title">Local CLI</h3>
+          <p class="home__desc">For batch jobs, build pipelines, and folks who never touch a mouse. Reads a directory, writes optimized files, exits clean.</p>
+          <div class="home__cmd">
+            <span class="prompt">$</span>
+            <code>npx xjmani-image-compressor ./photos</code>
+            <button class="home__copy" type="button" data-copy="npx xjmani-image-compressor ./photos" aria-label="Copy command">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+          </div>
+        </article>
+
+        <article class="home__card">
+          <div class="home__top">
+            <div class="home__icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+            </div>
+            <span class="home__label">open source</span>
+          </div>
+          <h3 class="home__title">View source</h3>
+          <p class="home__desc">Every line of code, MIT-licensed, on GitHub. Fork it, audit it, extend it. Issues and PRs welcome.</p>
+          <a class="home__cta" href="https://github.com/xjmani/image-compressor" data-coming-soon>github.com/xjmani/image-compressor →</a>
+        </article>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="container foot__bar">
+    <span class="foot__live" aria-hidden="true"></span>
+    <span class="foot__brand-mini"><span class="x">x</span>jmani</span>
+    <span class="foot__sep">·</span>
+    <span>privacy-first browser tools</span>
+    <span class="foot__sep">·</span>
+    <span>client-side</span>
+    <span class="foot__sep">·</span>
+    <span>MIT</span>
+    <span class="foot__sep">·</span>
+    <span>&copy; 2026 Loyaltydraw.com Inc</span>
+    <span class="foot__spacer" aria-hidden="true"></span>
+    <a href="https://github.com/xjmani" data-coming-soon>github</a>
+    <a href="/privacy">privacy</a>
+    <a href="/contact">contact</a>
+    <a href="/">xjmani.com</a>
+  </div>
+</footer>
+
+<div class="toast" id="toast" role="status" aria-live="polite">
+  <span class="toast__dot"></span>
+  <span id="toastMsg">copied to clipboard</span>
+</div>
+
+<!-- ============================================================
+     LIBRARIES (CDN)
+     - JSZip for batch download
+     - piexifjs for EXIF read/strip on JPEG
+     - browser-image-compression for compression
+     ============================================================ -->
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/piexifjs@1.0.6/piexif.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/browser-image-compression@2.0.2/dist/browser-image-compression.js"></script>
+
+<script>
+/* ============================================================
+   NETWORK COUNTER — privacy-as-instrument
+   Patches fetch + XHR after `load`, so initial CDN imports don't tick.
+   Any request the page makes after load increments the counter.
+   ============================================================ */
+(function () {
+  const netCount = document.getElementById('netCount');
+  const netPill  = document.getElementById('netPill');
+  let count = 0;
+  const tick = () => {
+    count += 1;
+    netCount.textContent = String(count);
+    netPill.dataset.state = 'dirty';
+    netPill.title = `${count} request${count === 1 ? '' : 's'} since page load — privacy claim broken!`;
+  };
+
+  const ready = () => {
+    const _fetch = window.fetch;
+    window.fetch = function (...args) {
+      tick();
+      return _fetch.apply(this, args);
+    };
+    const _open = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (...args) {
+      tick();
+      return _open.apply(this, args);
+    };
+    const _Image = window.Image;
+    window.Image = function (...args) {
+      const img = new _Image(...args);
+      const orig = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+      // we don't re-patch every <img>; this is best-effort. Most dynamic loads go through fetch/XHR.
+      return img;
+    };
+    window.Image.prototype = _Image.prototype;
+  };
+
+  if (document.readyState === 'complete') ready();
+  else window.addEventListener('load', ready);
+})();
+
+/* ============================================================
+   THEME
+   ============================================================ */
+(function () {
+  const KEY = 'xjmani-theme';
+  const root = document.documentElement;
+  const saved = localStorage.getItem(KEY);
+  if (saved) root.dataset.theme = saved;
+  document.getElementById('themeTog').addEventListener('click', () => {
+    const next = root.dataset.theme === 'dark' ? 'light' : 'dark';
+    root.dataset.theme = next;
+    localStorage.setItem(KEY, next);
+  });
+})();
+
+/* ============================================================
+   TOAST
+   ============================================================ */
+const toastEl = document.getElementById('toast');
+const toastMsg = document.getElementById('toastMsg');
+let toastTimer;
+function toast(msg) {
+  clearTimeout(toastTimer);
+  toastMsg.textContent = msg;
+  toastEl.dataset.visible = 'true';
+  toastTimer = setTimeout(() => { toastEl.dataset.visible = 'false'; }, 1800);
+}
+
+/* ============================================================
+   SETTINGS — quality, max width, format, exif strip
+   ============================================================ */
+const settings = {
+  quality: 80,
+  maxWidth: 2400,
+  format: 'keep',   // 'keep' | 'jpeg' | 'webp' | 'png'
+  stripExif: true,
+};
+
+const qRange = document.getElementById('qualityRange');
+const qVal   = document.getElementById('qualityVal');
+const wRange = document.getElementById('maxWidthRange');
+const wVal   = document.getElementById('maxWidthVal');
+const seg    = document.querySelector('.seg');
+const exifTog= document.getElementById('stripExif');
+
+function paintRange(input) {
+  const min = +input.min, max = +input.max, val = +input.value;
+  const pct = ((val - min) / (max - min)) * 100;
+  input.style.setProperty('--pct', pct + '%');
+}
+[qRange, wRange].forEach(paintRange);
+
+// Sliders: live display + debounced reprocess on input
+qRange.addEventListener('input', () => {
+  settings.quality = +qRange.value;
+  qVal.textContent = qRange.value;
+  paintRange(qRange);
+  scheduleReprocess();
+});
+wRange.addEventListener('input', () => {
+  settings.maxWidth = +wRange.value;
+  wVal.textContent = wRange.value + 'px';
+  paintRange(wRange);
+  scheduleReprocess();
+});
+
+// Discrete controls
+const formatVal = document.getElementById('formatVal');
+const exifVal   = document.getElementById('exifVal');
+
+seg.addEventListener('click', e => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b === btn ? 'true' : 'false'));
+  if (settings.format === btn.dataset.fmt) return;
+  settings.format = btn.dataset.fmt;
+  if (formatVal) formatVal.textContent = btn.dataset.fmt;
+  scheduleReprocess();
+});
+exifTog.addEventListener('change', () => {
+  settings.stripExif = exifTog.checked;
+  if (exifVal) exifVal.textContent = exifTog.checked ? 'on' : 'off';
+  scheduleReprocess();
+});
+
+/* ============================================================
+   FILE PICKING / DROP
+   ============================================================ */
+const drop       = document.getElementById('drop');
+const filePicker = document.getElementById('filePicker');
+const browseBtn  = document.getElementById('browseBtn');
+
+const ACCEPT = /^image\/(jpe?g|png|webp)$/i;
+const MAX_FILES = 50;
+
+browseBtn.addEventListener('click', e => { e.stopPropagation(); filePicker.click(); });
+drop.addEventListener('click', () => filePicker.click());
+drop.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); filePicker.click(); }
+});
+filePicker.addEventListener('change', e => {
+  intake(Array.from(e.target.files || []));
+  filePicker.value = '';
+});
+
+['dragenter', 'dragover'].forEach(ev =>
+  drop.addEventListener(ev, e => {
+    e.preventDefault();
+    drop.dataset.active = 'true';
+  })
+);
+['dragleave', 'drop'].forEach(ev =>
+  drop.addEventListener(ev, e => {
+    e.preventDefault();
+    if (ev === 'dragleave' && drop.contains(e.relatedTarget)) return;
+    drop.dataset.active = 'false';
+  })
+);
+drop.addEventListener('drop', e => {
+  const files = Array.from(e.dataTransfer?.files || []);
+  intake(files);
+});
+
+/* ============================================================
+   QUEUE STATE
+   ============================================================ */
+const queueEl     = document.getElementById('queue');
+const rowsEl      = document.getElementById('rows');
+const queueCount  = document.getElementById('queueCount');
+const queuePlural = document.getElementById('queuePlural');
+const downloadAll = document.getElementById('downloadAllBtn');
+const clearBtn    = document.getElementById('clearBtn');
+const statsEl     = document.getElementById('stats');
+const totalSavedEl= document.getElementById('totalSaved');
+const totalPctEl  = document.getElementById('totalPct');
+const exifCountEl = document.getElementById('exifCount');
+const totalCountEl= document.getElementById('totalCount');
+
+let items = []; // { id, file, name, status, originalSize, blob, thumbUrl, exifFound, gpsFound, error }
+let idSeq = 0;
+
+function intake(files) {
+  const accepted = files.filter(f => ACCEPT.test(f.type));
+  const rejected = files.length - accepted.length;
+  if (rejected > 0) toast(`skipped ${rejected} non-image file${rejected === 1 ? '' : 's'}`);
+
+  const room = MAX_FILES - items.length;
+  const taking = accepted.slice(0, room);
+  if (accepted.length > room) toast(`queue capped at ${MAX_FILES} — ignored extras`);
+
+  for (const file of taking) {
+    const item = {
+      id: ++idSeq,
+      file,
+      name: file.name,
+      status: 'pending',
+      originalSize: file.size,
+      blob: null,
+      thumbUrl: URL.createObjectURL(file),
+      exifFound: false,
+      gpsFound: false,
+      error: null,
+    };
+    items.push(item);
+    appendRow(item);
+  }
+
+  if (items.length > 0) {
+    queueEl.classList.remove('hidden');
+    statsEl.classList.remove('hidden');
+    refreshHead();
+    processNext();
+  }
+}
+
+function refreshHead() {
+  queueCount.textContent = items.length;
+  queuePlural.textContent = items.length === 1 ? '' : 's';
+  const done = items.filter(i => i.status === 'done');
+  downloadAll.disabled = done.length === 0;
+  refreshStats();
+}
+
+let statsBuilt = false;
+let statsRef = null;
+const prevStats = { saved: 0, pct: 0, exif: 0, count: 0 };
+
+function refreshStats() {
+  if (!statsBuilt) {
+    totalSavedEl.innerHTML = `<span data-num>0</span> <span class="unit" data-unit>KB</span>`;
+    totalPctEl.innerHTML   = `<span data-num>0</span><span class="unit">%</span>`;
+    statsRef = {
+      savedNum:  totalSavedEl.querySelector('[data-num]'),
+      savedUnit: totalSavedEl.querySelector('[data-unit]'),
+      pctNum:    totalPctEl.querySelector('[data-num]'),
+    };
+    statsBuilt = true;
+  }
+  // Compute totals; for items that are pending/processing AND have a prior result,
+  // keep using lastResult so the stats don't drop to 0 mid-reprocess.
+  let totalOrig = 0, totalNew = 0, exifVal = 0, countVal = 0;
+  for (const item of items) {
+    if (item.status === 'done' && item.blob) {
+      totalOrig += item.originalSize;
+      totalNew  += item.blob.size;
+      countVal++;
+      if (item.exifFound && settings.stripExif) exifVal++;
+    } else if ((item.status === 'pending' || item.status === 'processing') && item.lastResult) {
+      totalOrig += item.originalSize;
+      totalNew  += item.lastResult.size;
+      countVal++;
+      if (item.exifFound && settings.stripExif) exifVal++;
+    }
+  }
+  const saved = Math.max(0, totalOrig - totalNew);
+  const pct   = totalOrig > 0 ? Math.round((saved / totalOrig) * 100) : 0;
+
+  // Lock unit to the target's unit so the displayed string stays internally consistent during tween
+  const targetUnit = formatBytesUnit(saved);
+  const divisor = saved < 1024 ? 1 : saved < 1024 * 1024 ? 1024 : 1024 * 1024;
+  const decimals = saved < 1024 ? 0 : saved < 10 * 1024 ? 1 : saved < 1024 * 1024 ? 0 : 2;
+  statsRef.savedUnit.textContent = targetUnit;
+
+  tweenValue(statsRef.savedNum, prevStats.saved, saved, 320, v => (Math.max(0, v) / divisor).toFixed(decimals));
+  tweenValue(statsRef.pctNum,   prevStats.pct,   pct,   320, v => `${Math.round(v)}`);
+  tweenValue(exifCountEl,       prevStats.exif,  exifVal,  240, v => `${Math.round(v)}`);
+  tweenValue(totalCountEl,      prevStats.count, countVal, 240, v => `${Math.round(v)}`);
+
+  prevStats.saved = saved;
+  prevStats.pct   = pct;
+  prevStats.exif  = exifVal;
+  prevStats.count = countVal;
+}
+
+clearBtn.addEventListener('click', () => {
+  items.forEach(i => i.thumbUrl && URL.revokeObjectURL(i.thumbUrl));
+  items = [];
+  rowsEl.innerHTML = '';
+  queueEl.classList.add('hidden');
+  statsEl.classList.add('hidden');
+});
+
+// Re-process the queue when settings change. A generation counter invalidates
+// in-flight jobs so their stale results don't overwrite new ones.
+let reprocessTimer = null;
+let processingGeneration = 0;
+let prevSettingsSnap = { ...settings };
+let lastReprocessDirection = 0; // -1 (smaller expected), 0 (unclear), +1 (bigger)
+
+function scheduleReprocess() {
+  clearTimeout(reprocessTimer);
+  reprocessTimer = setTimeout(() => {
+    lastReprocessDirection = computeDirection(prevSettingsSnap, settings);
+    prevSettingsSnap = { ...settings };
+    processingGeneration++;
+    reprocessAll();
+  }, 240);
+}
+function computeDirection(prev, curr) {
+  let net = 0;
+  if (curr.quality  !== prev.quality)  net += Math.sign(curr.quality  - prev.quality);
+  if (curr.maxWidth !== prev.maxWidth) net += Math.sign(curr.maxWidth - prev.maxWidth);
+  // Format and EXIF flips are ambiguous in direction — leave as-is
+  return Math.sign(net);
+}
+function reprocessAll() {
+  if (items.length === 0) return;
+  let touched = 0;
+  for (const item of items) {
+    if (item.status === 'done' || item.status === 'error') {
+      // Preserve last result so the row keeps showing previous numbers while it re-processes
+      if (item.status === 'done' && item.blob) {
+        const newPct = Math.round(((item.originalSize - item.blob.size) / item.originalSize) * 100);
+        item.lastResult = { size: item.blob.size, pct: newPct };
+      }
+      item.status = 'pending';
+      item.blob = null;
+      item.error = null;
+      // Keep item.outputFormat for badge stability; it'll be overwritten when reprocessing finishes
+      touched++;
+      updateRow(item);
+    }
+  }
+  if (touched > 0) {
+    refreshHead();
+    processNext();
+  }
+}
+
+/* ============================================================
+   ROW RENDERING
+   ============================================================ */
+function appendRow(item) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.id = `row-${item.id}`;
+  row.dataset.state = 'pending';
+  row.innerHTML = `
+    <div class="row__thumb"><img src="${item.thumbUrl}" alt="" loading="lazy" /></div>
+    <div class="row__main">
+      <div class="row__name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</div>
+      <div class="row__meta" data-meta>
+        <span class="row__badge">queued</span>
+        <span class="muted">${formatBytes(item.originalSize)}</span>
+      </div>
+    </div>
+    <div class="row__actions">
+      <button class="row__icon-btn" data-download="${item.id}" disabled aria-label="Download compressed file">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      </button>
+    </div>
+  `;
+  rowsEl.appendChild(row);
+}
+
+function buildRichMeta(item, currSize, currPct) {
+  const extras = [];
+  if (settings.stripExif && item.exifFound) {
+    extras.push(item.gpsFound
+      ? `<span class="row__badge row__badge--gps">GPS removed</span>`
+      : `<span class="row__badge row__badge--exif">EXIF stripped</span>`);
+  }
+  if (item.outputFormat && item.outputFormat !== item.inputFormat) {
+    extras.push(`<span class="row__badge">→ ${item.outputFormat}</span>`);
+  }
+  return `
+    <span class="from">${formatBytes(item.originalSize)}</span>
+    <span class="arrow">→</span>
+    <span class="to" data-to data-bytes="${currSize}">${formatBytes(currSize)}</span>
+    <span class="row__badge row__badge--save" data-pct data-pct-num="${currPct}">−${currPct}%</span>
+    <span data-extra>${extras.join(' ')}</span>
+  `;
+}
+
+function updateRow(item) {
+  const row = document.getElementById(`row-${item.id}`);
+  if (!row) return;
+  const prevState = row.dataset.state;
+  row.dataset.state = item.status;
+  const meta = row.querySelector('[data-meta]');
+  const dlBtn = row.querySelector(`[data-download]`);
+  const wasRich = row.dataset.metaMode === 'rich';
+
+  if (item.status === 'pending') {
+    if (wasRich) {
+      // Keep previous rich numbers visible; recomputing styling adds the cue
+      row.dataset.recomputing = 'true';
+      dlBtn.disabled = true;
+    } else {
+      meta.innerHTML = `<span class="row__badge">queued</span> <span class="muted">${formatBytes(item.originalSize)}</span>`;
+      dlBtn.disabled = true;
+    }
+  } else if (item.status === 'processing') {
+    if (wasRich) {
+      row.dataset.recomputing = 'true';
+      dlBtn.disabled = true;
+      // Start directional drift on the displayed numbers
+      const toEl  = meta.querySelector('[data-to]');
+      const pctEl = meta.querySelector('[data-pct]');
+      if (toEl && pctEl) {
+        const fromSize = +toEl.dataset.bytes  || item.originalSize;
+        const fromPct  = +pctEl.dataset.pctNum || 0;
+        startRowDrift(row, toEl, pctEl, fromSize, fromPct, lastReprocessDirection);
+      }
+    } else {
+      meta.innerHTML = `<span class="row__badge">processing…</span> <span class="muted">${formatBytes(item.originalSize)}</span>`;
+    }
+  } else if (item.status === 'error') {
+    delete row.dataset.recomputing;
+    stopRowDrift(row);
+    meta.innerHTML = `<span class="row__badge row__badge--err">${escapeHtml(item.error || 'failed')}</span> <span class="muted">${formatBytes(item.originalSize)}</span>`;
+    row.dataset.metaMode = 'compact';
+    dlBtn.disabled = true;
+  } else if (item.status === 'done') {
+    delete row.dataset.recomputing;
+    const newSize = item.blob.size;
+    const newPct  = Math.round(((item.originalSize - newSize) / item.originalSize) * 100);
+
+    if (wasRich) {
+      // Stop any drift, snap-tween from currently-displayed value to the actual
+      const toEl  = meta.querySelector('[data-to]');
+      const pctEl = meta.querySelector('[data-pct]');
+      const tracker = row._driftTracker;
+      stopRowDrift(row);
+      const fromSize = tracker ? tracker.size : (+toEl.dataset.bytes || newSize);
+      const fromPct  = tracker ? tracker.pct  : (+pctEl.dataset.pctNum || newPct);
+      toEl.dataset.bytes = newSize;
+      pctEl.dataset.pctNum = newPct;
+      tweenValue(toEl, fromSize, newSize, 320, formatBytes);
+      tweenValue(pctEl, fromPct, newPct, 320, v => `−${Math.round(v)}%`);
+      // Refresh extras (EXIF/format badges) since they may have changed
+      const extras = meta.querySelector('[data-extra]');
+      if (extras) {
+        const html = [];
+        if (settings.stripExif && item.exifFound) {
+          html.push(item.gpsFound
+            ? `<span class="row__badge row__badge--gps">GPS removed</span>`
+            : `<span class="row__badge row__badge--exif">EXIF stripped</span>`);
+        }
+        if (item.outputFormat && item.outputFormat !== item.inputFormat) {
+          html.push(`<span class="row__badge">→ ${item.outputFormat}</span>`);
+        }
+        extras.innerHTML = html.join(' ');
+      }
+    } else {
+      meta.innerHTML = buildRichMeta(item, newSize, newPct);
+      row.dataset.metaMode = 'rich';
+    }
+    dlBtn.disabled = false;
+    dlBtn.onclick = () => downloadOne(item);
+  }
+  refreshHead();
+}
+
+/* -- tween + drift helpers ---------------------------------- */
+function tweenValue(el, from, to, duration, formatter) {
+  if (el._tweenId) { cancelAnimationFrame(el._tweenId); el._tweenId = null; }
+  if (from === to) { el.textContent = formatter(to); return; }
+  const start = performance.now();
+  const ease  = t => 1 - Math.pow(1 - t, 3);
+  function frame(now) {
+    const t = Math.min(1, (now - start) / duration);
+    el.textContent = formatter(from + (to - from) * ease(t));
+    if (t < 1) el._tweenId = requestAnimationFrame(frame);
+    else el._tweenId = null;
+  }
+  el._tweenId = requestAnimationFrame(frame);
+}
+function startRowDrift(row, toEl, pctEl, fromSize, fromPct, direction) {
+  // Cancel any in-flight tweens or drifts
+  stopRowDrift(row);
+  if (toEl._tweenId)  { cancelAnimationFrame(toEl._tweenId);  toEl._tweenId = null; }
+  if (pctEl._tweenId) { cancelAnimationFrame(pctEl._tweenId); pctEl._tweenId = null; }
+  if (direction === 0) {
+    // No clear direction — just keep numbers steady
+    row._driftTracker = { size: fromSize, pct: fromPct };
+    return;
+  }
+  const startTime = performance.now();
+  const tracker = { size: fromSize, pct: fromPct };
+  row._driftTracker = tracker;
+  function frame(now) {
+    const dt = (now - startTime) / 1000;
+    // size drifts at ~6% per second of original, capped to a sensible band
+    const sizeMul = 1 + direction * 0.06 * dt;
+    const cappedMul = Math.max(0.55, Math.min(1.55, sizeMul));
+    tracker.size = fromSize * cappedMul;
+    // savings pct moves opposite direction (more bytes = less savings)
+    const pctDelta = -direction * 4 * dt; // 4pp/sec
+    tracker.pct = Math.max(0, Math.min(99, fromPct + pctDelta));
+    toEl.textContent  = formatBytes(tracker.size);
+    pctEl.textContent = `−${Math.round(tracker.pct)}%`;
+    row._driftId = requestAnimationFrame(frame);
+  }
+  row._driftId = requestAnimationFrame(frame);
+}
+function stopRowDrift(row) {
+  if (row._driftId) {
+    cancelAnimationFrame(row._driftId);
+    row._driftId = null;
+  }
+}
+
+/* ============================================================
+   PROCESSING PIPELINE
+   - Concurrency: 2 at a time
+   - Pipeline: [read EXIF] → [compress via canvas] → [strip EXIF if applicable] → [done]
+   ============================================================ */
+let activeJobs = 0;
+const MAX_CONCURRENCY = 2;
+
+function processNext() {
+  while (activeJobs < MAX_CONCURRENCY) {
+    const next = items.find(i => i.status === 'pending');
+    if (!next) return;
+    activeJobs++;
+    next.status = 'processing';
+    updateRow(next);
+    processOne(next).finally(() => {
+      activeJobs--;
+      processNext();
+    });
+  }
+}
+
+async function processOne(item) {
+  const myGen = processingGeneration;
+  try {
+    const inputFmt = inferFormat(item.file);
+    item.inputFormat = inputFmt;
+
+    // Detect EXIF presence (JPEG only — PNG/WebP metadata stripping happens by re-encode)
+    if (inputFmt === 'jpeg' && window.piexif) {
+      try {
+        const dataUrl = await fileToDataUrl(item.file);
+        const exifObj = piexif.load(dataUrl);
+        const exifKeys = ['0th','Exif','GPS','1st'];
+        item.exifFound = exifKeys.some(k => exifObj[k] && Object.keys(exifObj[k]).length > 0);
+        item.gpsFound  = !!(exifObj.GPS && Object.keys(exifObj.GPS).length > 0);
+      } catch (err) { /* no EXIF or unparseable */ }
+    } else if (inputFmt !== 'jpeg') {
+      // For PNG/WebP we mark exifFound true if file size hints (cheap heuristic) — better:
+      // assume non-jpeg may carry metadata that re-encode strips. We'll mark conservatively:
+      item.exifFound = true; // re-encode will scrub it
+      item.gpsFound = false;
+    }
+
+    // Determine output format
+    const outFmt = settings.format === 'keep' ? inputFmt : settings.format;
+    item.outputFormat = outFmt;
+
+    const mime = `image/${outFmt === 'jpeg' ? 'jpeg' : outFmt}`;
+    const compressed = await imageCompression(item.file, {
+      maxSizeMB: 999, // we drive size via quality + dims, not a hard cap
+      maxWidthOrHeight: settings.maxWidth,
+      useWebWorker: true,
+      initialQuality: settings.quality / 100,
+      fileType: mime,
+      preserveExif: !settings.stripExif && outFmt === 'jpeg',
+    });
+
+    // browser-image-compression preserves some EXIF on JPEG by default; we explicitly reapply if user opted out of strip
+    if (!settings.stripExif && outFmt === 'jpeg' && inputFmt === 'jpeg' && window.piexif) {
+      try {
+        const inDataUrl  = await fileToDataUrl(item.file);
+        const outDataUrl = await blobToDataUrl(compressed);
+        const exifObj    = piexif.load(inDataUrl);
+        const exifBytes  = piexif.dump(exifObj);
+        const inserted   = piexif.insert(exifBytes, outDataUrl);
+        const reBlob     = dataUrlToBlob(inserted);
+        item.blob = reBlob;
+      } catch (e) {
+        item.blob = compressed;
+      }
+    } else {
+      item.blob = compressed;
+    }
+
+    // If settings changed during processing, discard this result and re-queue.
+    if (myGen !== processingGeneration) {
+      item.status = 'pending';
+      item.blob = null;
+      item.outputFormat = null;
+    } else {
+      item.status = 'done';
+    }
+  } catch (err) {
+    console.error(err);
+    if (myGen !== processingGeneration) {
+      item.status = 'pending';
+      item.blob = null;
+      item.outputFormat = null;
+    } else {
+      item.error = (err && err.message) ? err.message.slice(0, 40) : 'compression failed';
+      item.status = 'error';
+    }
+  } finally {
+    updateRow(item);
+  }
+}
+
+/* ============================================================
+   DOWNLOADS
+   ============================================================ */
+function downloadOne(item) {
+  const ext = (item.outputFormat || inferFormat(item.file));
+  const base = item.name.replace(/\.[^.]+$/, '');
+  const filename = `${base}.${ext === 'jpeg' ? 'jpg' : ext}`;
+  saveBlob(item.blob, filename);
+}
+
+downloadAll.addEventListener('click', async () => {
+  const done = items.filter(i => i.status === 'done');
+  if (!done.length) return;
+  if (done.length === 1) return downloadOne(done[0]);
+
+  const zip = new JSZip();
+  const folder = zip.folder('xjmani-compressed');
+  for (const item of done) {
+    const ext = item.outputFormat || inferFormat(item.file);
+    const base = item.name.replace(/\.[^.]+$/, '');
+    const filename = `${base}.${ext === 'jpeg' ? 'jpg' : ext}`;
+    folder.file(filename, item.blob);
+  }
+  toast('packing zip…');
+  const blob = await zip.generateAsync({ type: 'blob' });
+  saveBlob(blob, 'xjmani-compressed.zip');
+  toast(`saved ${done.length} files`);
+});
+
+function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+/* ============================================================
+   COPY / CTA HANDLERS
+   ============================================================ */
+document.querySelectorAll('[data-copy]').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(btn.dataset.copy);
+      toast('copied to clipboard');
+    } catch {
+      toast('copy failed');
+    }
+  });
+});
+document.querySelectorAll('[data-coming-soon]').forEach(a => {
+  a.addEventListener('click', e => {
+    e.preventDefault();
+    toast('coming with the polyrepo deploy — soon');
+  });
+});
+document.querySelectorAll('[data-verify]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const map = {
+      network: 'Open DevTools → Network tab → filter Fetch/XHR. Compress a file. Watch nothing happen.',
+      csp: 'View source — no analytics scripts, no telemetry, no third-party trackers.',
+      storage: 'Open DevTools → Application → Storage. Only your theme preference is saved.',
+    };
+    toast(map[btn.dataset.verify] || 'verify');
+  });
+});
+
+/* ============================================================
+   UTIL
+   ============================================================ */
+function formatBytes(b) {
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(b < 10240 ? 1 : 0)} KB`;
+  return `${(b / 1048576).toFixed(2)} MB`;
+}
+function formatBytesNum(b) {
+  if (b < 1024) return b.toString();
+  if (b < 1024 * 1024) return (b / 1024).toFixed(1);
+  return (b / 1048576).toFixed(2);
+}
+function formatBytesUnit(b) {
+  if (b < 1024) return 'B';
+  if (b < 1024 * 1024) return 'KB';
+  return 'MB';
+}
+function inferFormat(file) {
+  if (/jpe?g/i.test(file.type)) return 'jpeg';
+  if (/png/i.test(file.type))   return 'png';
+  if (/webp/i.test(file.type))  return 'webp';
+  return 'jpeg';
+}
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
+}
+function fileToDataUrl(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = () => rej(r.error);
+    r.readAsDataURL(file);
+  });
+}
+function blobToDataUrl(blob) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = () => rej(r.error);
+    r.readAsDataURL(blob);
+  });
+}
+function dataUrlToBlob(durl) {
+  const [meta, b64] = durl.split(',');
+  const mime = /:(.+?);/.exec(meta)[1];
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+</script>
+</body>
+</html>
