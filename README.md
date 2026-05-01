@@ -14,7 +14,7 @@ Part of the [xjmani](https://xjmani.com) tools collection.
 
 ## Why use it
 
-Most online image compressors upload your files to a server. This one does not. There is no backend. The page makes zero network requests after it loads — there is a counter in the header showing exactly that, which you can verify in your browser's devtools.
+Most online image compressors upload your files to a server. This one does not. There is no backend. After the page loads, no network requests are made. Open DevTools and watch the Network tab while you compress a file. Nothing fires.
 
 ## Three ways to run it
 
@@ -35,4 +35,4 @@ This is a single-file prototype: open `index.html` in a browser. The production 
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE).

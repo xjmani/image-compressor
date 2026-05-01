@@ -1,18 +1,64 @@
 <!doctype html>
+<!--
+  ======================================================================
+  Image Compressor + EXIF Stripper — single-file, browser-only
+  ======================================================================
+
+  What this is
+  ------------
+  A self-contained HTML page that lets a user shrink JPEG / PNG / WebP
+  images and strip embedded metadata (camera serial, GPS coordinates,
+  timestamps) without uploading anything. Three vendored libraries
+  power the work — see ./vendor/ — so the tool runs offline after the
+  initial download.
+
+  How compression works
+  ---------------------
+   1. Files arrive via drag/drop or the file picker (intake → items).
+   2. browser-image-compression downscales (max width) and re-encodes
+      at the user's chosen quality, in a Web Worker.
+   3. piexif strips or rewrites EXIF/GPS tags depending on the toggle.
+   4. Each finished item shows from→to bytes, savings %, and EXIF/GPS
+      badges; a stats bar aggregates totals across the queue.
+   5. "Download all" packages the queue into a .zip via JSZip.
+
+  Settings update live: changing quality, max width, format, or the
+  EXIF toggle invalidates in-flight jobs (a generation counter) and
+  re-processes everything still in the queue.
+
+  File layout
+  -----------
+   <head>     — fonts and all CSS (TOKENS / HEADER / HERO / DROP ZONE /
+                PRIVACY / SETTINGS / QUEUE / STATS / PROOF / TAKE-IT-
+                HOME / FOOTER / TOAST sections).
+   <body>     — header, hero+drop, sticky control bar (settings + Clear
+                / Download all), queue rows, stats bar, proof, take-it-
+                home, footer.
+   <script>   — settings state, intake, processing pipeline, queue
+                rendering, ZIP packaging, theme/toast.
+
+  Vendoring
+  ---------
+   ./vendor/jszip.min.js                       JSZip (zip output)
+   ./vendor/piexif.js                          piexif (EXIF I/O)
+   ./vendor/browser-image-compression.js       compression engine
+
+  License: MIT. Source: github.com/xjmani/image-compressor.
+-->
 <html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="theme-color" content="#08090a" />
 <meta name="color-scheme" content="dark light" />
-<title>Image Compressor — xjmani</title>
+<title>Image Compressor · xjmani</title>
 <meta name="description" content="Compress images and strip EXIF metadata. Everything happens in your browser. Nothing is uploaded." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 <style>
   /* ============================================================
-     TOKENS — lifted from xjmani.com globals.css
+     TOKENS, lifted from xjmani.com globals.css
      ============================================================ */
   :root {
     --bg:        #08090a;
@@ -34,6 +80,12 @@
     --red:       #f87171;
     --amber:     #fbbf24;
     --white:     #fafafa;
+    /* Blue is this tool's brand color (icon = from-blue-500 to-blue-700
+       on the parent landing page). Used by hero accent, drop zone, all
+       tool UI, and the take-it-home cards. */
+    --blue:      #60a5fa;
+    --blue-dim:  rgba(96,165,250,.15);
+    --blue-glow: rgba(96,165,250,.25);
 
     --font-body:  'Outfit', system-ui, sans-serif;
     --font-mono:  'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
@@ -73,6 +125,9 @@
     --purple-dim:rgba(124,58,237,.08);
     --yellow:    #ca8a04;
     --yellow-dim:rgba(202,138,4,.1);
+    --blue:      #2563eb;
+    --blue-dim:  rgba(37,99,235,.1);
+    --blue-glow: rgba(37,99,235,.18);
   }
 
   /* ============================================================
@@ -128,24 +183,32 @@
 
   :focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 4px; }
 
+  /* Container width + padding mirror the parent xjmani.com landing page
+     so tool pages and the home page feel like one product. */
   .container {
     width: 100%;
-    max-width: 1180px;
+    max-width: 1280px;
     margin: 0 auto;
-    padding: 0 clamp(1.5rem, 4.5vw, 2.5rem);
+    padding: 0 clamp(1.25rem, 4vw, 2.5rem);
   }
+  /* Fixed header height (without safe-area). Used to offset main so the
+     hero doesn't slide under the fixed nav on first paint. */
+  :root { --hdr-h: 60px; }
 
   /* ============================================================
-     HEADER
+     HEADER — fixed + opaque, mirrors the landing page nav. The
+     background extends into the iOS safe-area (notch / dynamic
+     island) so the status bar area is never transparent.
      ============================================================ */
   .hdr {
-    position: sticky;
+    position: fixed;
     top: 0;
-    z-index: 50;
-    backdrop-filter: blur(14px) saturate(140%);
-    -webkit-backdrop-filter: blur(14px) saturate(140%);
-    background: color-mix(in srgb, var(--bg) 80%, transparent);
+    left: 0;
+    right: 0;
+    z-index: 100;
+    background: var(--bg);
     border-bottom: 1px solid var(--border);
+    padding-top: env(safe-area-inset-top, 0px);
   }
   .hdr__inner {
     display: flex;
@@ -154,69 +217,65 @@
     gap: 1rem;
     padding-block: .9rem;
   }
-  .hdr__brand {
+  /* Breadcrumb. Each segment is independently clickable; the current
+     page reads as bold + neutral with a tool-color underline. The
+     leading SVG arrow nudges left on hover for a small "back" tell.
+     Slug font is kept mono for that "you are at /tools/<slug>" feel. */
+  .hdr__breadcrumb {
     display: inline-flex;
     align-items: center;
-    gap: .55rem;
+    gap: .15rem;
     font-family: var(--font-mono);
     font-size: var(--size-mono);
-    color: var(--text-dim);
-    transition: color .2s var(--ease);
+    letter-spacing: .02em;
+    min-width: 0;
   }
-  .hdr__brand:hover { color: var(--text); }
-  .hdr__brand .arr { color: var(--green); }
-  .hdr__brand .name {
+  .hdr__crumb {
+    display: inline-flex;
+    align-items: center;
+    gap: .45rem;
+    padding: .3rem .45rem;
+    margin: -.3rem -.05rem;
+    border-radius: 6px;
+    color: var(--text-dim);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color .18s var(--ease), background .18s var(--ease);
+  }
+  .hdr__crumb:hover {
+    color: var(--text);
+    background: color-mix(in srgb, var(--text) 5%, transparent);
+  }
+  .hdr__crumb--brand .hdr__name { color: var(--text); font-weight: 500; }
+  .hdr__crumb--brand .x { color: var(--green); }
+  .hdr__crumb--current {
     color: var(--text);
     font-weight: 500;
+    cursor: default;
+    position: relative;
   }
-  .hdr__brand .name .x { color: var(--green); }
-  .hdr__sep {
+  .hdr__crumb--current:hover { background: transparent; color: var(--text); }
+  .hdr__crumb--current::after {
+    content: '';
+    position: absolute;
+    left: .45rem;
+    right: .45rem;
+    bottom: .25rem;
+    height: 1px;
+    background: linear-gradient(90deg, var(--blue), transparent 100%);
+    opacity: .7;
+  }
+  .hdr__crumb-sep {
     color: var(--text-mute);
-    margin-inline: .35rem;
-  }
-  .hdr__tool {
-    color: var(--text-dim);
+    user-select: none;
+    pointer-events: none;
+    opacity: .55;
+    font-weight: 300;
   }
   .hdr__right {
     display: flex;
     align-items: center;
     gap: .85rem;
-  }
-  .net-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: .5rem;
-    padding: .45rem .75rem;
-    border: 1px solid var(--border);
-    background: var(--bg-card);
-    border-radius: 999px;
-    font-family: var(--font-mono);
-    font-size: var(--size-mono);
-    color: var(--text-dim);
-    transition: all .2s var(--ease);
-  }
-  .net-pill:hover { border-color: var(--border-hover); }
-  .net-pill .dot {
-    width: 6px; height: 6px;
-    border-radius: 999px;
-    background: var(--green);
-    box-shadow: 0 0 0 0 var(--green-glow);
-    animation: pulse 2.4s var(--ease) infinite;
-  }
-  .net-pill[data-state="dirty"] .dot {
-    background: var(--red);
-    animation-duration: 1s;
-  }
-  .net-pill[data-state="dirty"] {
-    color: var(--red);
-    border-color: color-mix(in srgb, var(--red) 40%, transparent);
-  }
-  .net-pill .label { letter-spacing: .02em; }
-  .net-pill .num { color: var(--text); font-weight: 600; }
-  .net-pill[data-state="dirty"] .num { color: var(--red); }
-  @keyframes pulse {
-    0%, 100% { box-shadow: 0 0 0 0 var(--green-glow); }
-    50%      { box-shadow: 0 0 0 6px transparent; }
   }
   .theme-tog {
     width: 36px; height: 36px;
@@ -235,9 +294,16 @@
   /* ============================================================
      HERO
      ============================================================ */
-  main { position: relative; z-index: 1; }
+  /* Offset for the fixed header. env(safe-area-inset-top) covers the iOS
+     notch / dynamic island so content starts at the right place on every
+     device. */
+  main {
+    position: relative;
+    z-index: 1;
+    padding-top: calc(var(--hdr-h) + env(safe-area-inset-top, 0px));
+  }
   .hero {
-    padding-block: clamp(2.75rem, 6vw, 4.5rem) clamp(2rem, 4vw, 3rem);
+    padding-block: clamp(2.25rem, 5vw, 3.75rem) clamp(1.75rem, 3vw, 2.5rem);
     position: relative;
   }
   .hero__eyebrow {
@@ -257,26 +323,26 @@
     content: '';
     width: 6px; height: 6px;
     border-radius: 999px;
-    background: var(--green);
-    box-shadow: 0 0 0 3px var(--green-dim);
+    background: var(--blue);
+    box-shadow: 0 0 0 3px var(--blue-dim);
   }
   .hero__title {
     font-family: var(--font-body);
     font-weight: 600;
     font-size: var(--size-hero);
-    line-height: .95;
+    line-height: .98;
     letter-spacing: -.03em;
     margin: 0 0 .9rem;
     color: var(--text);
   }
   .hero__title .accent {
-    background: linear-gradient(90deg, var(--green), color-mix(in srgb, var(--green) 50%, var(--purple)));
+    background: linear-gradient(90deg, var(--blue), color-mix(in srgb, var(--blue) 50%, var(--purple)));
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
   }
   .hero__sub {
-    font-size: clamp(1rem, 1vw + .8rem, 1.18rem);
+    font-size: clamp(1rem, .8vw + .8rem, 1.15rem);
     color: var(--text-dim);
     max-width: 56ch;
     margin: 0 0 2.5rem;
@@ -293,7 +359,7 @@
     position: absolute;
     inset: 0;
     pointer-events: none;
-    background: radial-gradient(40% 50% at 80% 20%, var(--green-dim) 0%, transparent 70%);
+    background: radial-gradient(40% 50% at 80% 20%, var(--blue-dim) 0%, transparent 70%);
     opacity: .65;
     z-index: -1;
   }
@@ -303,9 +369,9 @@
      ============================================================ */
   .drop {
     position: relative;
-    border: 1px dashed color-mix(in srgb, var(--green) 35%, var(--border) 65%);
+    border: 1px dashed color-mix(in srgb, var(--blue) 35%, var(--border) 65%);
     background:
-      linear-gradient(180deg, color-mix(in srgb, var(--green) 4%, transparent), transparent 60%),
+      linear-gradient(180deg, color-mix(in srgb, var(--blue) 4%, transparent), transparent 60%),
       var(--bg-card);
     border-radius: 16px;
     padding: clamp(2.5rem, 5vw, 3.75rem) clamp(1.5rem, 3vw, 2.25rem);
@@ -317,16 +383,16 @@
     content: '';
     position: absolute;
     inset: 0;
-    background-image: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--green) 40%, transparent) 1px, transparent 0);
+    background-image: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--blue) 40%, transparent) 1px, transparent 0);
     background-size: 18px 18px;
-    opacity: .14;
+    opacity: .12;
     pointer-events: none;
     transition: opacity .25s var(--ease);
   }
   .drop[data-active="true"] {
-    border-color: var(--green);
+    border-color: var(--blue);
     background:
-      linear-gradient(180deg, color-mix(in srgb, var(--green) 10%, transparent), transparent 70%),
+      linear-gradient(180deg, color-mix(in srgb, var(--blue) 10%, transparent), transparent 70%),
       var(--bg-card);
     transform: scale(1.005);
   }
@@ -338,12 +404,12 @@
     border: 1px solid var(--border-hover);
     background: var(--surface);
     border-radius: 14px;
-    color: var(--green);
+    color: var(--blue);
     transition: all .25s var(--ease);
   }
   .drop[data-active="true"] .drop__icon {
-    border-color: var(--green);
-    background: var(--green-dim);
+    border-color: var(--blue);
+    background: var(--blue-dim);
     transform: translateY(-2px);
   }
   .drop__icon svg { width: 24px; height: 24px; }
@@ -358,7 +424,7 @@
   .drop__title .blink {
     display: inline-block;
     width: .55ch;
-    background: var(--green);
+    background: var(--blue);
     color: transparent;
     margin-left: 2px;
     animation: caret 1.05s steps(1) infinite;
@@ -374,8 +440,8 @@
     align-items: center;
     gap: .5rem;
     padding: .7rem 1.15rem;
-    background: var(--green);
-    color: #02110a;
+    background: var(--blue);
+    color: #051b3a;
     border: none;
     border-radius: 10px;
     font-family: var(--font-mono);
@@ -386,7 +452,7 @@
   }
   .drop__btn:hover {
     transform: translateY(-1px);
-    box-shadow: 0 8px 24px -8px var(--green-glow);
+    box-shadow: 0 8px 24px -8px var(--blue-glow);
   }
   .drop__formats {
     margin-top: 1.25rem;
@@ -397,17 +463,136 @@
   }
 
   /* ============================================================
+     PRIVACY STRIP — uses the tool's brand color (NOT brand green).
+     This callout is a product claim about THIS tool specifically;
+     the green is reserved for the global privacy promise on the
+     parent landing page and the proof section below.
+     ============================================================ */
+  .privacy {
+    margin-top: 1.25rem;
+    padding: .85rem 1.1rem;
+    border: 1px solid color-mix(in srgb, var(--blue) 25%, var(--border));
+    background:
+      linear-gradient(135deg, var(--blue-dim), transparent 60%),
+      var(--bg-card);
+    border-radius: 12px;
+    display: flex; align-items: center; gap: .85rem;
+    font-family: var(--font-mono);
+    font-size: var(--size-small);
+    color: var(--text-dim);
+  }
+  .privacy svg { width: 18px; height: 18px; color: var(--blue); flex-shrink: 0; }
+  .privacy strong { color: var(--text); font-weight: 600; }
+
+  /* ============================================================
      SETTINGS STRIP
      ============================================================ */
-  .settings {
-    margin-top: 1.5rem;
+  /* Sticky control bar wrapping the settings tiles plus the queue head
+     (Clear / Download all). Pins below the fixed header so quality,
+     format, EXIF, and the primary actions stay reachable while a long
+     queue is scrolled. Margin-top gives the same breathing room above
+     the bar as the hero allowed below the privacy strip. */
+  .ctrl-bar {
+    position: sticky;
+    top: calc(var(--hdr-h) + env(safe-area-inset-top, 0px));
+    z-index: 30;
+    background: var(--bg);
+    padding-block: .65rem .85rem;
+    margin-top: clamp(2.5rem, 4.5vw, 4rem);
+    display: flex;
+    flex-direction: column;
+    gap: .8rem;
+  }
+  .ctrl-bar.hidden { display: none; }
+
+  /* On desktop the full 4-tile settings row is always visible; the
+     mobile-only summary header is hidden. */
+  .settings { margin-top: 0; }
+  .settings__summary { display: none; }
+
+  /* Mobile (≤720px): the 4 tiles collapse into a single-line summary
+     ("Settings · 80 · 2400px · keep · EXIF on") that taps to expand.
+     The expanded panel floats as a dropdown OVER the queue rows
+     (absolute-positioned below the summary), so the sticky bar itself
+     never grows beyond ~50px regardless of expanded state. */
+  @media (max-width: 720px) {
+    .settings {
+      position: relative;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      border-radius: 12px;
+    }
+    .settings__summary {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      padding: .7rem .9rem;
+      background: transparent;
+      border: 0;
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: var(--size-mono);
+      cursor: pointer;
+      gap: .55rem;
+      text-align: left;
+      transition: background .15s var(--ease);
+    }
+    .settings__summary:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+    .settings__summary-label {
+      display: inline-flex;
+      align-items: center;
+      gap: .4rem;
+      color: var(--text-dim);
+      letter-spacing: .04em;
+      flex-shrink: 0;
+    }
+    .settings__summary-label svg { width: 14px; height: 14px; }
+    .settings__summary-values {
+      flex: 1 1 auto;
+      color: var(--text-dim);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .settings__summary-values [data-key] { color: var(--text); font-weight: 500; }
+    .settings__summary-values .sep { color: var(--text-mute); margin-inline: .35em; }
+    .settings__summary-chevron {
+      width: 14px; height: 14px;
+      transition: transform .25s var(--ease);
+      color: var(--text-mute);
+      flex-shrink: 0;
+    }
+    .settings[data-expanded="true"] .settings__summary-chevron { transform: rotate(180deg); }
+    /* Specificity bump (.settings + class) so these rules beat the bare
+       `.settings__row { display: grid }` declared later in source.
+       Expanded panel is a floating popover under the summary so the
+       sticky bar stays compact while the panel overlays the queue. */
+    .settings:not([data-expanded="true"]) .settings__row { display: none; }
+    .settings[data-expanded="true"] .settings__row {
+      display: grid;
+      grid-template-columns: 1fr;
+      position: absolute;
+      top: 100%;
+      left: -1px;
+      right: -1px;
+      margin-top: 4px;
+      padding: .65rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 16px 32px -8px rgba(0,0,0,.55),
+                  0 0 0 1px color-mix(in srgb, var(--text) 4%, transparent);
+      max-height: calc(100vh - var(--hdr-h) - env(safe-area-inset-top, 0px) - 120px);
+      overflow-y: auto;
+      z-index: 31;
+    }
   }
   .settings__row {
     display: grid;
     gap: .65rem;
     grid-template-columns: 1fr;
   }
-  /* Each field is its own raised tile — separation by surface, not lines.
+  /* Each field is its own raised tile, separation by surface, not lines.
      Subgrid keeps label/control/hint rows aligned across all 4 tiles. */
   @media (min-width: 720px) {
     .settings__row {
@@ -472,7 +657,7 @@
     appearance: none;
     width: 100%;
     height: 4px;
-    background: linear-gradient(90deg, var(--green) var(--pct, 50%), var(--surface) var(--pct, 50%));
+    background: linear-gradient(90deg, var(--blue) var(--pct, 50%), var(--surface) var(--pct, 50%));
     border-radius: 999px;
     outline: none;
   }
@@ -483,7 +668,7 @@
     border-radius: 999px;
     background: var(--text);
     border: 2px solid var(--bg);
-    box-shadow: 0 0 0 1px var(--green);
+    box-shadow: 0 0 0 1px var(--blue);
     transition: transform .15s var(--ease);
   }
   input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.1); }
@@ -492,7 +677,7 @@
     border-radius: 999px;
     background: var(--text);
     border: 2px solid var(--bg);
-    box-shadow: 0 0 0 1px var(--green);
+    box-shadow: 0 0 0 1px var(--blue);
   }
   .seg {
     display: flex;
@@ -517,11 +702,11 @@
   }
   .seg button:hover { color: var(--text); }
   .seg button[aria-pressed="true"] {
-    background: var(--green-dim);
-    color: var(--green);
+    background: var(--blue-dim);
+    color: var(--blue);
     box-shadow:
-      0 0 0 1px color-mix(in srgb, var(--green) 35%, transparent) inset,
-      0 0 16px -4px var(--green-glow);
+      0 0 0 1px color-mix(in srgb, var(--blue) 35%, transparent) inset,
+      0 0 16px -4px var(--blue-glow);
     font-weight: 600;
   }
   .toggle {
@@ -553,12 +738,12 @@
     transition: all .2s var(--ease-spring);
   }
   .toggle input:checked + .toggle__track {
-    background: var(--green);
-    border-color: var(--green);
+    background: var(--blue);
+    border-color: var(--blue);
   }
   .toggle input:checked + .toggle__track::after {
     transform: translateX(16px);
-    background: #02110a;
+    background: #051b3a;
   }
   .toggle:hover .toggle__track { border-color: var(--border-hover); }
   .toggle__hint {
@@ -569,15 +754,17 @@
   /* ============================================================
      QUEUE / RESULTS
      ============================================================ */
+  /* .queue holds only the per-file rows; the head (title + Clear /
+     Download all buttons) lives in .ctrl-bar above so it pins with
+     the settings strip when scrolling. */
   .queue {
-    margin-top: 2rem;
+    margin-top: 0;
   }
   .queue__head {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
-    margin-bottom: .8rem;
     flex-wrap: wrap;
   }
   .queue__title {
@@ -588,7 +775,7 @@
     color: var(--text-dim);
     margin: 0;
   }
-  .queue__title .num { color: var(--green); font-weight: 600; }
+  .queue__title .num { color: var(--blue); font-weight: 600; }
   .queue__actions {
     display: inline-flex;
     gap: .55rem;
@@ -611,13 +798,15 @@
     transition: all .2s var(--ease);
   }
   .btn:hover { border-color: var(--border-hover); transform: translateY(-1px); }
-  .btn--green {
-    background: var(--green);
-    color: #02110a;
-    border-color: var(--green);
+  /* Primary tool action (e.g. "Download all"). Uses the tool brand color
+     (blue for image-compressor — matches the icon on xjmani.com/tools). */
+  .btn--brand {
+    background: var(--blue);
+    color: #051b3a;
+    border-color: var(--blue);
   }
-  .btn--green:hover {
-    box-shadow: 0 8px 24px -8px var(--green-glow);
+  .btn--brand:hover {
+    box-shadow: 0 8px 24px -8px var(--blue-glow);
   }
   .btn--ghost {
     background: transparent;
@@ -648,7 +837,7 @@
     content: '';
     position: absolute;
     inset: 0;
-    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--green) 18%, transparent), transparent);
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--blue) 18%, transparent), transparent);
     transform: translateX(-100%);
     animation: scan 1.4s var(--ease) infinite;
     pointer-events: none;
@@ -656,7 +845,7 @@
   @keyframes scan {
     100% { transform: translateX(100%); }
   }
-  /* recomputing — keep the previous numbers visible but pulse to show they're stale */
+  /* recomputing, keep the previous numbers visible but pulse to show they're stale */
   .row[data-recomputing="true"] .to,
   .row[data-recomputing="true"] .row__badge--save {
     animation: stale-pulse 1.6s var(--ease) infinite;
@@ -757,9 +946,9 @@
     flex-shrink: 0;
   }
   .row__icon-btn:hover {
-    color: var(--green);
-    border-color: var(--green);
-    background: var(--green-dim);
+    color: var(--blue);
+    border-color: var(--blue);
+    background: var(--blue-dim);
   }
   .row__icon-btn svg { width: 14px; height: 14px; }
   .row__icon-btn:disabled { opacity: .3; pointer-events: none; }
@@ -779,11 +968,12 @@
     .row__meta { font-size: 11px; }
   }
 
-  /* mobile header — hide secondary text so brand + controls fit */
+  /* mobile header, hide secondary text so brand + controls fit */
   @media (max-width: 540px) {
-    .hdr__sep, .hdr__tool { display: none; }
-    .net-pill .label { display: none; }
-    .net-pill { padding: .4rem .65rem; gap: .4rem; }
+    /* Collapse the middle "tools" crumb on narrow screens; brand and
+       current-page slug stay so users still know where they are. */
+    .hdr__crumb--mid,
+    .hdr__crumb-sep--mid { display: none; }
   }
   /* mobile section vertical rhythm */
   @media (max-width: 600px) {
@@ -798,7 +988,7 @@
     margin-top: 2rem;
     border: 1px solid var(--border);
     background:
-      linear-gradient(135deg, color-mix(in srgb, var(--green) 6%, transparent), transparent 60%),
+      linear-gradient(135deg, color-mix(in srgb, var(--blue) 6%, transparent), transparent 60%),
       var(--bg-card);
     border-radius: 14px;
     padding: 1.35rem 1.4rem;
@@ -919,11 +1109,14 @@
   .proof__verify:hover { text-decoration: underline; }
 
   /* ============================================================
-     TAKE-IT-HOME (yellow accent — Loyalty Draw brand)
+     TAKE-IT-HOME — uses the tool's brand color (blue here, matching
+     the icon on xjmani.com/tools). Privacy section above stays green;
+     this section deliberately re-asserts the tool color so the page
+     bookends with brand on both ends.
      ============================================================ */
   .home {
-    --accent: var(--yellow);
-    --accent-dim: var(--yellow-dim);
+    --accent: var(--blue);
+    --accent-dim: var(--blue-dim);
     position: relative;
   }
   .home::before {
@@ -931,19 +1124,19 @@
     position: absolute;
     top: 10%; right: -8%;
     width: 38%; aspect-ratio: 1;
-    background: radial-gradient(circle, var(--yellow-dim), transparent 70%);
+    background: radial-gradient(circle, var(--blue-dim), transparent 70%);
     filter: blur(40px);
     opacity: .6;
     pointer-events: none;
     z-index: -1;
   }
-  .home .section__eyebrow { color: var(--yellow); }
+  .home .section__eyebrow { color: var(--blue); }
   .home__grid {
     display: grid;
     gap: 1rem;
     grid-template-columns: 1fr;
   }
-  @media (min-width: 800px) { .home__grid { grid-template-columns: repeat(3, 1fr); } }
+  @media (min-width: 720px) { .home__grid { grid-template-columns: repeat(3, 1fr); } }
   .home__card {
     border: 1px solid var(--border);
     background: var(--bg-card);
@@ -960,12 +1153,12 @@
     content: '';
     position: absolute;
     inset: 0;
-    background: linear-gradient(135deg, var(--yellow-dim), transparent 55%);
+    background: linear-gradient(135deg, var(--blue-dim), transparent 55%);
     opacity: 0;
     transition: opacity .25s var(--ease);
     pointer-events: none;
   }
-  .home__card:hover { border-color: color-mix(in srgb, var(--yellow) 35%, var(--border)); }
+  .home__card:hover { border-color: color-mix(in srgb, var(--blue) 35%, var(--border)); }
   .home__card:hover::before { opacity: 1; }
   .home__top {
     display: flex; align-items: center; gap: .75rem;
@@ -973,8 +1166,8 @@
   .home__icon {
     width: 36px; height: 36px;
     display: flex; align-items: center; justify-content: center;
-    background: var(--yellow-dim);
-    color: var(--yellow);
+    background: var(--blue-dim);
+    color: var(--blue);
     border-radius: 10px;
   }
   .home__icon svg { width: 16px; height: 16px; }
@@ -1032,9 +1225,9 @@
     transition: all .15s var(--ease);
   }
   .home__copy:hover {
-    color: var(--green);
-    border-color: color-mix(in srgb, var(--green) 35%, transparent);
-    background: var(--green-dim);
+    color: var(--blue);
+    border-color: color-mix(in srgb, var(--blue) 35%, transparent);
+    background: var(--blue-dim);
   }
   .home__copy svg { width: 12px; height: 12px; display: block; }
   .home__cmd .prompt { color: var(--green); flex-shrink: 0; }
@@ -1049,13 +1242,13 @@
     transition: color .2s var(--ease);
     flex-shrink: 0;
   }
-  .home__copy:hover { color: var(--green); }
+  .home__copy:hover { color: var(--blue); }
   .home__copy svg { width: 13px; height: 13px; display: block; }
   .home__cta {
     display: inline-flex;
     align-items: center;
     gap: .5rem;
-    color: var(--yellow);
+    color: var(--blue);
     font-family: var(--font-mono);
     font-size: var(--size-mono);
     font-weight: 600;
@@ -1066,9 +1259,12 @@
   .home__card:hover .home__cta { gap: .75rem; }
 
   /* ============================================================
-     FOOTER — IDE-style status bar. Single row, mono, universal.
+     FOOTER — slim status-bar that mirrors the header. The same
+     padding-block (.9rem) frames the page symmetrically, and the
+     tinted background plus animated green pulse echo the brand
+     mark in the top bar.
      ============================================================ */
-  footer.foot {
+  .ftr {
     margin-top: var(--gap-lg);
     background: color-mix(in srgb, var(--text) 3%, var(--bg));
     border-top: 1px solid var(--border);
@@ -1078,53 +1274,54 @@
     letter-spacing: .02em;
     color: var(--text-mute);
   }
-  .foot__bar {
+  .ftr__inner {
     display: flex;
     align-items: center;
     gap: .55rem .8rem;
     flex-wrap: wrap;
     line-height: 1.4;
   }
-  .foot__live {
+  .ftr__live {
     width: 7px; height: 7px;
     border-radius: 999px;
     background: var(--green);
     box-shadow: 0 0 0 0 var(--green-glow);
-    animation: foot-pulse 2.4s var(--ease) infinite;
+    animation: ftr-pulse 2.4s var(--ease) infinite;
     display: inline-block;
     flex-shrink: 0;
   }
-  @keyframes foot-pulse {
+  @keyframes ftr-pulse {
     0%, 100% { box-shadow: 0 0 0 0 var(--green-glow); }
     50%      { box-shadow: 0 0 0 5px transparent; }
   }
-  .foot__brand-mini {
+  .ftr__brand-mini {
     color: var(--text);
     font-weight: 600;
   }
-  .foot__brand-mini .x { color: var(--green); }
-  .foot__sep {
+  .ftr__brand-mini .x { color: var(--green); }
+  .ftr__sep {
     color: var(--text-mute);
     user-select: none;
   }
-  .foot__bar a {
+  .ftr__inner a {
     color: var(--text-dim);
     transition: color .2s var(--ease);
     display: inline-flex;
     align-items: center;
     gap: .25rem;
+    text-decoration: none;
   }
-  .foot__bar a::after {
+  .ftr__inner a[data-ext]::after {
     content: '↗';
     font-size: 10px;
     color: var(--text-mute);
     transition: transform .2s var(--ease), color .2s var(--ease);
   }
-  .foot__bar a:hover { color: var(--text); }
-  .foot__bar a:hover::after { color: var(--green); transform: translate(1px, -1px); }
-  .foot__spacer { margin-left: auto; }
+  .ftr__inner a:hover { color: var(--text); }
+  .ftr__inner a[data-ext]:hover::after { color: var(--green); transform: translate(1px, -1px); }
+  .ftr__spacer { margin-left: auto; }
   @media (max-width: 720px) {
-    .foot__spacer { margin-left: 0; flex-basis: 100%; height: 0; }
+    .ftr__spacer { margin-left: 0; flex-basis: 100%; height: 0; }
   }
 
   /* ============================================================
@@ -1181,18 +1378,16 @@
      ============================================================ -->
 <header class="hdr">
   <div class="container hdr__inner">
-    <a href="/" class="hdr__brand" aria-label="Back to xjmani.com">
-      <span class="arr">←</span>
-      <span class="name"><span class="x">x</span>jmani</span>
-      <span class="hdr__sep">/</span>
-      <span class="hdr__tool">image-compressor</span>
-    </a>
+    <nav class="hdr__breadcrumb" aria-label="Breadcrumb">
+      <a class="hdr__crumb hdr__crumb--brand" href="https://xjmani.com" aria-label="Back to xjmani.com">
+        <span class="hdr__name"><span class="x">x</span>jmani</span>
+      </a>
+      <span class="hdr__crumb-sep hdr__crumb-sep--mid" aria-hidden="true">/</span>
+      <a class="hdr__crumb hdr__crumb--mid" href="https://xjmani.com/tools">tools</a>
+      <span class="hdr__crumb-sep" aria-hidden="true">/</span>
+      <span class="hdr__crumb hdr__crumb--current" aria-current="page">image-compressor</span>
+    </nav>
     <div class="hdr__right">
-      <button class="net-pill" id="netPill" data-state="clean" type="button" aria-live="polite" title="Network requests since page load">
-        <span class="dot" aria-hidden="true"></span>
-        <span class="label">network</span>
-        <span class="num" id="netCount">0</span>
-      </button>
       <button class="theme-tog" id="themeTog" type="button" aria-label="Toggle theme">
         <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
@@ -1211,29 +1406,68 @@
        ============================================================ -->
   <section class="hero">
     <div class="container">
-      <span class="hero__eyebrow">private · offline · zero uploads</span>
+      <span class="hero__eyebrow">Smaller files. EXIF actually gone.</span>
       <h1 class="hero__title">Compress images.<br /><span class="accent">Strip the metadata.</span></h1>
-      <p class="hero__sub">Shrink JPEGs, PNGs, and WebPs and remove every embedded GPS coordinate, camera serial, and timestamp <strong>without a single byte leaving your device</strong>. Drag a file in. Watch the network counter stay at zero.</p>
+      <p class="hero__sub">Shrink JPEGs, PNGs, and WebPs and remove every embedded GPS coordinate, camera serial, and timestamp <strong>without a single byte leaving your device</strong>. Drag a file in, see the savings, drop the cleaned file back into your filesystem.</p>
 
-      <div class="drop" id="drop" tabindex="0" role="button" aria-label="Drop images here or click to browse">
+      <div class="drop" id="drop" data-active="false" tabindex="0" role="button" aria-label="Drop images here or click to browse">
         <div class="drop__icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <rect x="3" y="3" width="18" height="18" rx="3"/>
             <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor"/>
             <path d="m3 17 5-5 4 4 3-3 6 6"/>
           </svg>
         </div>
-        <h2 class="drop__title">drop images<span class="blink">_</span></h2>
-        <p class="drop__sub">JPEG · PNG · WebP — up to 50 files at once</p>
+        <h2 class="drop__title">Drop images here<span class="blink">_</span></h2>
+        <p class="drop__sub">or click below. Stays on this device, period.</p>
         <button class="drop__btn" id="browseBtn" type="button">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          choose files
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          Choose files
         </button>
+        <p class="drop__formats">JPEG · PNG · WebP · up to 50 files in browser memory</p>
         <input type="file" id="filePicker" accept="image/jpeg,image/jpg,image/png,image/webp" multiple hidden />
       </div>
 
-      <!-- Settings strip -->
-      <div class="settings">
+      <div class="privacy">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+        <span><strong>Zero uploads.</strong> Compression and EXIF stripping run entirely in your browser. Open devtools and watch the network tab; you'll see nothing leave.</span>
+      </div>
+
+      <!-- Sticky control bar — wraps settings + queue head (Clear /
+           Download all). Hidden until the first file is added, then
+           pins below the fixed header so controls stay reachable while
+           the queue scrolls. On mobile the settings collapse to a
+           summary line that taps to expand. -->
+      <div class="ctrl-bar hidden" id="ctrlBar">
+      <div class="settings" id="settings" data-expanded="false">
+        <button class="settings__summary" id="settingsToggle" type="button" aria-expanded="false" aria-controls="settingsRow">
+          <span class="settings__summary-label">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="4" y1="21" x2="4" y2="14"/>
+              <line x1="4" y1="10" x2="4" y2="3"/>
+              <line x1="12" y1="21" x2="12" y2="12"/>
+              <line x1="12" y1="8" x2="12" y2="3"/>
+              <line x1="20" y1="21" x2="20" y2="16"/>
+              <line x1="20" y1="12" x2="20" y2="3"/>
+              <line x1="1" y1="14" x2="7" y2="14"/>
+              <line x1="9" y1="8" x2="15" y2="8"/>
+              <line x1="17" y1="16" x2="23" y2="16"/>
+            </svg>
+            Settings
+          </span>
+          <span class="settings__summary-values">
+            <span data-key="q">80</span><span class="sep">·</span><span data-key="w">2400px</span><span class="sep">·</span><span data-key="f">keep</span><span class="sep">·</span><span data-key="e">EXIF on</span>
+          </span>
+          <svg class="settings__summary-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
         <div class="settings__row">
           <div class="field">
             <label class="field__label" for="qualityRange">
@@ -1243,7 +1477,7 @@
             <div class="field__control">
               <input type="range" id="qualityRange" min="10" max="100" value="80" step="1" />
             </div>
-            <p class="field__hint">higher = bigger file</p>
+            <p class="field__hint">Higher = bigger file</p>
           </div>
 
           <div class="field">
@@ -1254,7 +1488,7 @@
             <div class="field__control">
               <input type="range" id="maxWidthRange" min="320" max="4000" value="2400" step="40" />
             </div>
-            <p class="field__hint">downsizes only, never enlarges</p>
+            <p class="field__hint">Downsizes only, never enlarges</p>
           </div>
 
           <div class="field">
@@ -1282,29 +1516,31 @@
               <label class="toggle">
                 <input type="checkbox" id="stripExif" checked />
                 <span class="toggle__track"></span>
-                <span>strip metadata</span>
+                <span>Strip metadata</span>
               </label>
             </div>
-            <p class="field__hint">removes camera &amp; GPS</p>
+            <p class="field__hint">Removes camera &amp; GPS</p>
           </div>
         </div>
-      </div>
+      </div><!-- /.settings -->
 
-      <!-- Queue -->
-      <div class="queue hidden" id="queue">
-        <div class="queue__head">
-          <h3 class="queue__title">Queue · <span class="num" id="queueCount">0</span> file<span id="queuePlural">s</span></h3>
-          <div class="queue__actions">
-            <button class="btn btn--ghost" id="clearBtn" type="button">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
-              clear
-            </button>
-            <button class="btn btn--green" id="downloadAllBtn" type="button" disabled>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              download all (.zip)
-            </button>
-          </div>
+      <div class="queue__head">
+        <h3 class="queue__title">Queue · <span class="num" id="queueCount">0</span> file<span id="queuePlural">s</span></h3>
+        <div class="queue__actions">
+          <button class="btn btn--ghost" id="clearBtn" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg>
+            Clear
+          </button>
+          <button class="btn btn--brand" id="downloadAllBtn" type="button" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download all (.zip)
+          </button>
         </div>
+      </div><!-- /.queue__head -->
+      </div><!-- /.ctrl-bar -->
+
+      <!-- Queue rows -->
+      <div class="queue hidden" id="queue">
         <div id="rows"></div>
 
         <!-- Stats bar -->
@@ -1312,22 +1548,22 @@
           <div class="stat">
             <span class="stat__label">Total Saved</span>
             <span class="stat__value stat--saved" id="totalSaved">0 <span class="unit">KB</span></span>
-            <span class="stat__sub">across <span id="totalCount">0</span> files</span>
+            <span class="stat__sub">Across <span id="totalCount">0</span> files</span>
           </div>
           <div class="stat">
             <span class="stat__label">Reduction</span>
             <span class="stat__value" id="totalPct">0<span class="unit">%</span></span>
-            <span class="stat__sub">average across queue</span>
+            <span class="stat__sub">Average across queue</span>
           </div>
           <div class="stat">
             <span class="stat__label">EXIF Stripped</span>
             <span class="stat__value" id="exifCount">0</span>
-            <span class="stat__sub">images had metadata removed</span>
+            <span class="stat__sub">Images had metadata removed</span>
           </div>
           <div class="stat">
             <span class="stat__label">Uploaded</span>
             <span class="stat__value" id="uploadedCount" style="color: var(--green)">0 <span class="unit">bytes</span></span>
-            <span class="stat__sub">that's the point</span>
+            <span class="stat__sub">That's the point</span>
           </div>
         </div>
       </div>
@@ -1342,27 +1578,27 @@
       <div class="section__head">
         <span class="section__eyebrow">verify it yourself</span>
         <h2 class="section__title">Privacy as an instrument, not a claim.</h2>
-        <p class="section__lede">There's a counter in the header showing every network request the page has made since you opened it. After load, it stays at zero. Forever. If it ever ticks, the privacy claim is wrong — and you'll see it before we do.</p>
+        <p class="section__lede">Your images never leave the tab. Every claim below is something you can confirm in your own browser before you trust this tool with anything sensitive.</p>
       </div>
 
       <div class="proof">
         <article class="proof__item">
           <span class="proof__num">01</span>
           <h3 class="proof__title">No uploads</h3>
-          <p class="proof__body">Compression and EXIF stripping run in your browser using the Canvas API and a tiny EXIF parser. The bytes never leave the tab.</p>
-          <button class="proof__verify" type="button" data-verify="network">verify in devtools →</button>
+          <p class="proof__body">Compression and EXIF stripping run in your browser using the Canvas API and a tiny EXIF parser. Open devtools, switch to the Network tab, drop a file: nothing fires. The bytes never leave the tab.</p>
+          <button class="proof__verify" type="button" data-verify="network">F12 &rarr; Network &rarr; compress &rarr;</button>
         </article>
         <article class="proof__item">
           <span class="proof__num">02</span>
           <h3 class="proof__title">No telemetry, no analytics</h3>
-          <p class="proof__body">No Google Analytics, Plausible, Sentry — nothing reports back. The header counter would tick if it did. CSP is locked down to the origin.</p>
-          <button class="proof__verify" type="button" data-verify="csp">view source →</button>
+          <p class="proof__body">No Google Analytics, Plausible, Sentry. Nothing reports back. The full source is on GitHub under MIT — clone it and grep.</p>
+          <button class="proof__verify" type="button" data-verify="csp">View source &rarr;</button>
         </article>
         <article class="proof__item">
           <span class="proof__num">03</span>
           <h3 class="proof__title">No tracking</h3>
           <p class="proof__body">No cookies, no localStorage of file content, no fingerprinting. Settings stick on this device only. Refresh and the queue clears.</p>
-          <button class="proof__verify" type="button" data-verify="storage">inspect storage →</button>
+          <button class="proof__verify" type="button" data-verify="storage">F12 &rarr; Application &rarr; Storage &rarr;</button>
         </article>
       </div>
     </div>
@@ -1389,7 +1625,7 @@
           </div>
           <h3 class="home__title">Standalone HTML</h3>
           <p class="home__desc">One self-contained <code style="font-family:var(--font-mono);font-size:.92em;color:var(--text)">index.html</code>. No internet required. Drop it on a thumb drive, double-click, work offline forever.</p>
-          <a class="home__cta" href="#" data-coming-soon>download (.html, ~340 KB) →</a>
+          <a class="home__cta" href="#" data-coming-soon>Download (.html, ~340 KB) →</a>
         </article>
 
         <article class="home__card">
@@ -1426,80 +1662,39 @@
   </section>
 </main>
 
-<footer class="foot">
-  <div class="container foot__bar">
-    <span class="foot__live" aria-hidden="true"></span>
-    <span class="foot__brand-mini"><span class="x">x</span>jmani</span>
-    <span class="foot__sep">·</span>
-    <span>privacy-first browser tools</span>
-    <span class="foot__sep">·</span>
-    <span>client-side</span>
-    <span class="foot__sep">·</span>
+<footer class="ftr">
+  <div class="container ftr__inner">
+    <span class="ftr__live" aria-hidden="true"></span>
+    <span class="ftr__brand-mini"><span class="x">x</span>jmani</span>
+    <span class="ftr__sep">·</span>
+    <span>Privacy-first browser tools</span>
+    <span class="ftr__sep">·</span>
+    <span>Client-only</span>
+    <span class="ftr__sep">·</span>
     <span>MIT</span>
-    <span class="foot__sep">·</span>
+    <span class="ftr__sep">·</span>
     <span>&copy; 2026 Loyaltydraw.com Inc</span>
-    <span class="foot__spacer" aria-hidden="true"></span>
-    <a href="https://github.com/xjmani/image-compressor" target="_blank" rel="noopener">github</a>
-    <a href="/privacy">privacy</a>
-    <a href="/contact">contact</a>
-    <a href="/">xjmani.com</a>
+    <span class="ftr__spacer" aria-hidden="true"></span>
+    <a href="https://github.com/xjmani/image-compressor" target="_blank" rel="noopener" data-ext>github</a>
+    <a href="https://xjmani.com/legal/privacy" data-ext>Privacy</a>
+    <a href="https://xjmani.com/contact" data-ext>Contact</a>
+    <a href="https://xjmani.com" data-ext>xjmani.com</a>
   </div>
 </footer>
 
 <div class="toast" id="toast" role="status" aria-live="polite">
   <span class="toast__dot"></span>
-  <span id="toastMsg">copied to clipboard</span>
+  <span id="toastMsg">Copied to clipboard</span>
 </div>
 
 <!-- ============================================================
-     LIBRARIES (vendored — see /vendor/README.md for versions + sha256)
+     LIBRARIES (vendored, see /vendor/README.md for versions + sha256)
      ============================================================ -->
 <script src="vendor/jszip.min.js"></script>
 <script src="vendor/piexif.js"></script>
 <script src="vendor/browser-image-compression.js"></script>
 
 <script>
-/* ============================================================
-   NETWORK COUNTER — privacy-as-instrument
-   Patches fetch + XHR after `load`, so initial CDN imports don't tick.
-   Any request the page makes after load increments the counter.
-   ============================================================ */
-(function () {
-  const netCount = document.getElementById('netCount');
-  const netPill  = document.getElementById('netPill');
-  let count = 0;
-  const tick = () => {
-    count += 1;
-    netCount.textContent = String(count);
-    netPill.dataset.state = 'dirty';
-    netPill.title = `${count} request${count === 1 ? '' : 's'} since page load — privacy claim broken!`;
-  };
-
-  const ready = () => {
-    const _fetch = window.fetch;
-    window.fetch = function (...args) {
-      tick();
-      return _fetch.apply(this, args);
-    };
-    const _open = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function (...args) {
-      tick();
-      return _open.apply(this, args);
-    };
-    const _Image = window.Image;
-    window.Image = function (...args) {
-      const img = new _Image(...args);
-      const orig = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
-      // we don't re-patch every <img>; this is best-effort. Most dynamic loads go through fetch/XHR.
-      return img;
-    };
-    window.Image.prototype = _Image.prototype;
-  };
-
-  if (document.readyState === 'complete') ready();
-  else window.addEventListener('load', ready);
-})();
-
 /* ============================================================
    THEME
    ============================================================ */
@@ -1529,7 +1724,7 @@ function toast(msg) {
 }
 
 /* ============================================================
-   SETTINGS — quality, max width, format, exif strip
+   SETTINGS, quality, max width, format, exif strip
    ============================================================ */
 const settings = {
   quality: 80,
@@ -1556,12 +1751,14 @@ function paintRange(input) {
 qRange.addEventListener('input', () => {
   settings.quality = +qRange.value;
   qVal.textContent = qRange.value;
+  if (summaryQ) summaryQ.textContent = qRange.value;
   paintRange(qRange);
   scheduleReprocess();
 });
 wRange.addEventListener('input', () => {
   settings.maxWidth = +wRange.value;
   wVal.textContent = wRange.value + 'px';
+  if (summaryW) summaryW.textContent = wRange.value + 'px';
   paintRange(wRange);
   scheduleReprocess();
 });
@@ -1577,11 +1774,13 @@ seg.addEventListener('click', e => {
   if (settings.format === btn.dataset.fmt) return;
   settings.format = btn.dataset.fmt;
   if (formatVal) formatVal.textContent = btn.dataset.fmt;
+  if (summaryF) summaryF.textContent = btn.dataset.fmt;
   scheduleReprocess();
 });
 exifTog.addEventListener('change', () => {
   settings.stripExif = exifTog.checked;
   if (exifVal) exifVal.textContent = exifTog.checked ? 'on' : 'off';
+  if (summaryE) summaryE.textContent = 'EXIF ' + (exifTog.checked ? 'on' : 'off');
   scheduleReprocess();
 });
 
@@ -1633,6 +1832,34 @@ const queuePlural = document.getElementById('queuePlural');
 const downloadAll = document.getElementById('downloadAllBtn');
 const clearBtn    = document.getElementById('clearBtn');
 const statsEl     = document.getElementById('stats');
+const settingsEl  = document.getElementById('settings');
+const ctrlBarEl   = document.getElementById('ctrlBar');
+const settingsToggle = document.getElementById('settingsToggle');
+const summaryQ = document.querySelector('.settings__summary-values [data-key="q"]');
+const summaryW = document.querySelector('.settings__summary-values [data-key="w"]');
+const summaryF = document.querySelector('.settings__summary-values [data-key="f"]');
+const summaryE = document.querySelector('.settings__summary-values [data-key="e"]');
+
+// Tap the summary line on mobile to expand/collapse the full controls.
+function setSettingsExpanded(expanded) {
+  settingsEl.dataset.expanded = expanded ? 'true' : 'false';
+  settingsToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+}
+settingsToggle.addEventListener('click', () => {
+  setSettingsExpanded(settingsEl.dataset.expanded !== 'true');
+});
+// Tap outside the expanded popover to dismiss it.
+document.addEventListener('click', (e) => {
+  if (settingsEl.dataset.expanded !== 'true') return;
+  if (settingsEl.contains(e.target)) return;
+  setSettingsExpanded(false);
+});
+// Escape also closes the popover.
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && settingsEl.dataset.expanded === 'true') {
+    setSettingsExpanded(false);
+  }
+});
 const totalSavedEl= document.getElementById('totalSaved');
 const totalPctEl  = document.getElementById('totalPct');
 const exifCountEl = document.getElementById('exifCount');
@@ -1648,7 +1875,7 @@ function intake(files) {
 
   const room = MAX_FILES - items.length;
   const taking = accepted.slice(0, room);
-  if (accepted.length > room) toast(`queue capped at ${MAX_FILES} — ignored extras`);
+  if (accepted.length > room) toast(`queue capped at ${MAX_FILES}. Ignored extras.`);
 
   for (const file of taking) {
     const item = {
@@ -1668,10 +1895,20 @@ function intake(files) {
   }
 
   if (items.length > 0) {
+    const wasHidden = ctrlBarEl.classList.contains('hidden');
+    ctrlBarEl.classList.remove('hidden');
     queueEl.classList.remove('hidden');
     statsEl.classList.remove('hidden');
     refreshHead();
     processNext();
+    // First batch only: scroll the control bar (and therefore the first
+    // row beneath it) into view so the user lands right at the queue
+    // without an extra scroll.
+    if (wasHidden) {
+      requestAnimationFrame(() => {
+        ctrlBarEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
   }
 }
 
@@ -1738,8 +1975,11 @@ clearBtn.addEventListener('click', () => {
   items.forEach(i => i.thumbUrl && URL.revokeObjectURL(i.thumbUrl));
   items = [];
   rowsEl.innerHTML = '';
+  ctrlBarEl.classList.add('hidden');
   queueEl.classList.add('hidden');
   statsEl.classList.add('hidden');
+  // Collapse the mobile summary so the next session opens fresh.
+  setSettingsExpanded(false);
 });
 
 // Re-process the queue when settings change. A generation counter invalidates
@@ -1762,7 +2002,7 @@ function computeDirection(prev, curr) {
   let net = 0;
   if (curr.quality  !== prev.quality)  net += Math.sign(curr.quality  - prev.quality);
   if (curr.maxWidth !== prev.maxWidth) net += Math.sign(curr.maxWidth - prev.maxWidth);
-  // Format and EXIF flips are ambiguous in direction — leave as-is
+  // Format and EXIF flips are ambiguous in direction, leave as-is
   return Math.sign(net);
 }
 function reprocessAll() {
@@ -1802,7 +2042,7 @@ function appendRow(item) {
     <div class="row__main">
       <div class="row__name" title="${escapeHtml(item.name)}">${escapeHtml(item.name)}</div>
       <div class="row__meta" data-meta>
-        <span class="row__badge">queued</span>
+        <span class="row__badge">Queued</span>
         <span class="muted">${formatBytes(item.originalSize)}</span>
       </div>
     </div>
@@ -1849,7 +2089,7 @@ function updateRow(item) {
       row.dataset.recomputing = 'true';
       dlBtn.disabled = true;
     } else {
-      meta.innerHTML = `<span class="row__badge">queued</span> <span class="muted">${formatBytes(item.originalSize)}</span>`;
+      meta.innerHTML = `<span class="row__badge">Queued</span> <span class="muted">${formatBytes(item.originalSize)}</span>`;
       dlBtn.disabled = true;
     }
   } else if (item.status === 'processing') {
@@ -1865,12 +2105,12 @@ function updateRow(item) {
         startRowDrift(row, toEl, pctEl, fromSize, fromPct, lastReprocessDirection);
       }
     } else {
-      meta.innerHTML = `<span class="row__badge">processing…</span> <span class="muted">${formatBytes(item.originalSize)}</span>`;
+      meta.innerHTML = `<span class="row__badge">Processing…</span> <span class="muted">${formatBytes(item.originalSize)}</span>`;
     }
   } else if (item.status === 'error') {
     delete row.dataset.recomputing;
     stopRowDrift(row);
-    meta.innerHTML = `<span class="row__badge row__badge--err">${escapeHtml(item.error || 'failed')}</span> <span class="muted">${formatBytes(item.originalSize)}</span>`;
+    meta.innerHTML = `<span class="row__badge row__badge--err">${escapeHtml(item.error || 'Failed')}</span> <span class="muted">${formatBytes(item.originalSize)}</span>`;
     row.dataset.metaMode = 'compact';
     dlBtn.disabled = true;
   } else if (item.status === 'done') {
@@ -1934,7 +2174,7 @@ function startRowDrift(row, toEl, pctEl, fromSize, fromPct, direction) {
   if (toEl._tweenId)  { cancelAnimationFrame(toEl._tweenId);  toEl._tweenId = null; }
   if (pctEl._tweenId) { cancelAnimationFrame(pctEl._tweenId); pctEl._tweenId = null; }
   if (direction === 0) {
-    // No clear direction — just keep numbers steady
+    // No clear direction, just keep numbers steady
     row._driftTracker = { size: fromSize, pct: fromPct };
     return;
   }
@@ -1991,7 +2231,7 @@ async function processOne(item) {
     const inputFmt = inferFormat(item.file);
     item.inputFormat = inputFmt;
 
-    // Detect EXIF presence (JPEG only — PNG/WebP metadata stripping happens by re-encode)
+    // Detect EXIF presence (JPEG only, PNG/WebP metadata stripping happens by re-encode)
     if (inputFmt === 'jpeg' && window.piexif) {
       try {
         const dataUrl = await fileToDataUrl(item.file);
@@ -2001,9 +2241,11 @@ async function processOne(item) {
         item.gpsFound  = !!(exifObj.GPS && Object.keys(exifObj.GPS).length > 0);
       } catch (err) { /* no EXIF or unparseable */ }
     } else if (inputFmt !== 'jpeg') {
-      // For PNG/WebP we mark exifFound true if file size hints (cheap heuristic) — better:
-      // assume non-jpeg may carry metadata that re-encode strips. We'll mark conservatively:
-      item.exifFound = true; // re-encode will scrub it
+      // PNG/WebP can carry metadata (XMP, iTXt, Exif chunks) that the
+      // browser doesn't expose without a format-specific parser. Mark
+      // exifFound = true conservatively so the re-encode below is what
+      // strips it; the per-row badge still reads accurately.
+      item.exifFound = true;
       item.gpsFound = false;
     }
 
@@ -2013,7 +2255,7 @@ async function processOne(item) {
 
     const mime = `image/${outFmt === 'jpeg' ? 'jpeg' : outFmt}`;
     const compressed = await imageCompression(item.file, {
-      maxSizeMB: 999, // we drive size via quality + dims, not a hard cap
+      maxSizeMB: 999, // size is driven by quality + dims, not a hard cap
       maxWidthOrHeight: settings.maxWidth,
       useWebWorker: true,
       initialQuality: settings.quality / 100,
@@ -2021,7 +2263,9 @@ async function processOne(item) {
       preserveExif: !settings.stripExif && outFmt === 'jpeg',
     });
 
-    // browser-image-compression preserves some EXIF on JPEG by default; we explicitly reapply if user opted out of strip
+    // browser-image-compression preserves some EXIF on JPEG by default;
+    // the EXIF is explicitly reapplied below when the user chose NOT to
+    // strip metadata, since the engine's preserveExif is best-effort.
     if (!settings.stripExif && outFmt === 'jpeg' && inputFmt === 'jpeg' && window.piexif) {
       try {
         const inDataUrl  = await fileToDataUrl(item.file);
@@ -2117,14 +2361,14 @@ document.querySelectorAll('[data-copy]').forEach(btn => {
 document.querySelectorAll('[data-coming-soon]').forEach(a => {
   a.addEventListener('click', e => {
     e.preventDefault();
-    toast('coming with the polyrepo deploy — soon');
+    toast('coming soon with the polyrepo deploy');
   });
 });
 document.querySelectorAll('[data-verify]').forEach(btn => {
   btn.addEventListener('click', () => {
     const map = {
       network: 'Open DevTools → Network tab → filter Fetch/XHR. Compress a file. Watch nothing happen.',
-      csp: 'View source — no analytics scripts, no telemetry, no third-party trackers.',
+      csp: 'View source. No analytics scripts, no telemetry, no third-party trackers.',
       storage: 'Open DevTools → Application → Storage. Only your theme preference is saved.',
     };
     toast(map[btn.dataset.verify] || 'verify');
