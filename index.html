@@ -1341,12 +1341,21 @@
     font-family: var(--font-mono);
     font-size: var(--size-mono);
     box-shadow: 0 12px 40px -12px rgba(0,0,0,.5);
-    transition: transform .35s var(--ease-spring);
+    transition: transform .35s var(--ease-spring), opacity .25s var(--ease);
     display: inline-flex;
     align-items: center;
     gap: .55rem;
+    /* Belt-and-suspenders hide: opacity + pointer-events ensure the toast
+       can't leak visually even if the translate falls short on a short
+       viewport or under the iOS bottom safe-area. */
+    opacity: 0;
+    pointer-events: none;
   }
-  .toast[data-visible="true"] { transform: translateX(-50%) translateY(0); }
+  .toast[data-visible="true"] {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+    pointer-events: auto;
+  }
   .toast__dot {
     width: 6px; height: 6px;
     border-radius: 999px;
@@ -1684,7 +1693,7 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite">
   <span class="toast__dot"></span>
-  <span id="toastMsg">Copied to clipboard</span>
+  <span id="toastMsg"></span>
 </div>
 
 <!-- ============================================================
