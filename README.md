@@ -19,8 +19,14 @@ Most online image compressors upload your files to a server. This one does not. 
 ## Three ways to run it
 
 1. **Open the website:** [image.xjmani.com](https://image.xjmani.com) (coming soon)
-2. **Download the standalone HTML:** one self-contained file you can run from disk, fully offline
-3. **Use the CLI:** `npx xjmani-image-compressor ./photos` (coming soon)
+2. **Download the standalone HTML:** clone this repo (or grab the zip) and open `index.html`. Libraries are vendored under `vendor/`, so no internet is required after that
+3. **Self-host:** drop `index.html` and `vendor/` on any static host (NAS, intranet, SharePoint). Anyone who can reach the page can use it without bytes leaving the network
+
+## Self-host
+
+Drop `index.html` and `vendor/` on any static file host: NAS, SharePoint, internal wiki, or any HTTP server you control. The page runs entirely in the browser, so anyone who can reach the URL can compress images and strip EXIF without bytes leaving your network.
+
+No build step. No server runtime.
 
 ## Privacy
 
